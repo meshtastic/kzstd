@@ -1,0 +1,25 @@
+public final class org/meshtastic/kzstd/Zstd {
+	public static final field DEFAULT_LEVEL I
+	public static final field INSTANCE Lorg/meshtastic/kzstd/Zstd;
+	public final fun compress ([BI)[B
+	public final fun compress ([BLorg/meshtastic/kzstd/ZstdDictionary;I)[B
+	public static synthetic fun compress$default (Lorg/meshtastic/kzstd/Zstd;[BIILjava/lang/Object;)[B
+	public static synthetic fun compress$default (Lorg/meshtastic/kzstd/Zstd;[BLorg/meshtastic/kzstd/ZstdDictionary;IILjava/lang/Object;)[B
+	public final fun decompress ([BI)[B
+	public final fun decompress ([BLorg/meshtastic/kzstd/ZstdDictionary;I)[B
+}
+
+public final class org/meshtastic/kzstd/ZstdDictionary {
+	public static final field Companion Lorg/meshtastic/kzstd/ZstdDictionary$Companion;
+	public fun <init> ([B)V
+}
+
+public final class org/meshtastic/kzstd/ZstdDictionary$Companion {
+	public final fun getEMPTY ()Lorg/meshtastic/kzstd/ZstdDictionary;
+}
+
+public final class org/meshtastic/kzstd/ZstdException : java/lang/RuntimeException {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+

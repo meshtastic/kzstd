@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, test & API check (all KMP targets)
+    # macOS is required to compile the Apple/native klibs (iOS, macOS, tvOS) — the
+    # whole value of kzstd is its multiplatform reach, so CI compiles every target,
+    # not just the JVM one.
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # `build` compiles all 13 targets, runs the common/jvm/js/wasm/macOS/iOS-sim
+      # tests, and runs `apiCheck` (binary-compatibility-validator). Linux/Windows
+      # native test binaries are cross-compiled but not executed on a macOS host.
+      - name: Build, test & API check
+        run: ./gradlew build --stacktrace

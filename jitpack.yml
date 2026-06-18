@@ -1,0 +1,15 @@
+# Build configuration for https://jitpack.io
+#
+# Maven Central (org.meshtastic:kzstd) is the primary distribution channel for the
+# KMP artifacts. JitPack remains a fallback for JVM consumers, serving the build
+# under the coordinate com.github.meshtastic:kzstd:<tag>. Only the JVM variant is
+# served here; the native / JS / Wasm klibs are published via Maven Central.
+
+jdk:
+  - openjdk17
+
+install:
+  # publishToMavenLocal emits the KMP variants (metadata + jvm) under ~/.m2, where
+  # JitPack picks them up. --no-daemon keeps the CI container from holding on to
+  # Gradle workers after the build completes.
+  - ./gradlew publishToMavenLocal --no-daemon

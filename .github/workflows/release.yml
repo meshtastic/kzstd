@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Test, build & publish to Maven Central
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Read version
+        id: version
+        run: echo "version=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Verify VERSION matches gradle.properties
+        run: |
+          VF="${{ steps.version.outputs.version }}"
+          VG=$(grep -E "^VERSION_NAME=" gradle.properties | cut -d'=' -f2 | tr -d '[:space:]')
+          if [ "$VF" != "$VG" ]; then
+            echo "::error::VERSION ($VF) != gradle.properties VERSION_NAME ($VG)"
+            exit 1
+          fi
+          echo "✓ version $VF"
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build, test & API check (all targets)
+        run: ./gradlew build --stacktrace
+
+      - name: Resolve tag state on origin
+        id: tag_state
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          git fetch origin "refs/tags/v$V:refs/tags/v$V" 2>/dev/null || true
+          if git rev-parse "v$V" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push release tag to origin
+        if: github.event_name == 'workflow_dispatch' && steps.tag_state.outputs.exists == 'false'
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$V" -m "Release v$V"
+          git push origin "v$V"
+
+      - name: Stage signed artifacts locally
+        env:
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+        run: ./gradlew publishToMavenLocal --stacktrace
+
+      - name: Collect artifacts for attestation
+        run: |
+          mkdir -p maven-attestation
+          find ~/.m2/repository/org/meshtastic/kzstd -type f \
+            \( -name "*.jar" -o -name "*.klib" -o -name "*.pom" -o -name "*.module" \) \
+            -exec cp {} maven-attestation/ \;
+          ls -lh maven-attestation/
+
+      - name: Attest artifacts
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: maven-attestation/*
+
+      - name: Check Maven Central state
+        # Probe whether v$VERSION is already on Maven Central; if so, skip publish
+        # (Sonatype rejects re-uploads), so a retry after a partial release is safe.
+        id: mc_check
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          HTTP=$(curl -sS -o /dev/null -w "%{http_code}" \
+            "https://repo1.maven.org/maven2/org/meshtastic/kzstd-jvm/$V/kzstd-jvm-$V.pom")
+          echo "Maven Central POM probe for v$V: HTTP $HTTP"
+          if [ "$HTTP" = "200" ]; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to Maven Central
+        if: steps.mc_check.outputs.already_published == 'false'
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.OSSRH_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+        run: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body: |
+            ## kzstd v${{ steps.version.outputs.version }}
+
+            Pure-Kotlin multiplatform Zstandard (zstd) codec with dictionary support —
+            interoperable with libzstd, zero runtime dependencies.
+
+            ```kotlin
+            implementation("org.meshtastic:kzstd:${{ steps.version.outputs.version }}")
+            ```
+          generate_release_notes: true

@@ -1,0 +1,15 @@
+# Kotlin / Gradle
+.gradle/
+build/
+out/
+local.properties
+.kotlin/
+*.class
+
+# Keep gradle-wrapper.jar (conventional to commit)
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.DS_Store

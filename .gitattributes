@@ -1,0 +1,21 @@
+# Auto-detect text files and normalize to LF line endings.
+* text=auto eol=lf
+
+# Binary files
+*.png    binary
+*.jpg    binary
+*.jar    binary
+*.zip    binary
+*.zstd   binary
+
+# Gradle wrapper
+gradlew      text eol=lf
+gradlew.bat  text eol=crlf
+gradle/wrapper/gradle-wrapper.jar binary
+
+# Keep generated output from skewing GitHub language stats
+**/build/**                      linguist-generated
+
+# Diff hints
+*.kt     diff=kotlin
+*.kts    diff=kotlin

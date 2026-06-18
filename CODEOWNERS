@@ -1,0 +1,19 @@
+# CODEOWNERS — review routing.
+# Pre-team phase: individual handles. Replace with @meshtastic/* teams once they exist.
+# See https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Catch-all
+*                            @jamesarich
+
+# Public API + the codec engine — the single source of truth
+/src/commonMain/             @jamesarich
+/api/                        @jamesarich
+
+# Build, publishing & CI
+/build.gradle.kts            @jamesarich
+/settings.gradle.kts         @jamesarich
+/gradle/                     @jamesarich
+/.github/                    @jamesarich
+
+# Security policy
+/SECURITY.md                 @jamesarich
