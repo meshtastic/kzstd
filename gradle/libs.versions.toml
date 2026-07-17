@@ -1,5 +1,5 @@
 [versions]
-kotlin = "2.4.0"
+kotlin = "2.4.10"
 # zstd-jni is a jvmTest-only ORACLE — NOT a runtime dependency. The interop tests
 # cross-check that kzstd's pure-Kotlin frames are decodable by real libzstd (and
 # that kzstd decodes real libzstd frames): the both-directions interop gate.
