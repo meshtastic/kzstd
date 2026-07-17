@@ -7,8 +7,8 @@ zstd-jni = "1.5.7-11"
 dokka = "2.2.0"
 binary-compat = "0.18.1"
 vanniktech-publish = "0.36.0"
-junit-jupiter = "6.1.0"
-junit-platform = "6.1.0"
+junit-jupiter = "6.1.2"
+junit-platform = "6.1.2"
 
 [libraries]
 zstd-jni = { module = "com.github.luben:zstd-jni", version.ref = "zstd-jni" }
