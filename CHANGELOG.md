@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1]
+
+Dependency and toolchain refresh — no codec or public-API changes.
+
+### Changed
+
+- Built with Kotlin 2.4.10 (was 2.4.0).
+- junit-framework (JVM test suite only) updated to 6.1.2.
+
+### Security
+
+- Pinned yarn `resolution()` floors for the Kotlin/JS test harness — ws 8.21.0,
+  serialize-javascript 7.0.5, webpack 5.104.1, diff 8.0.3 — clearing the open
+  Dependabot alerts. Dev-time only; nothing under `kotlin-js-store/` ships in
+  published artifacts.
+- Dependabot no longer tries (and fails) to update the Kotlin-managed yarn lock
+  under `kotlin-js-store/`; Renovate handles all dependency updates.
+
 ## [0.1.0]
 
 Initial release. A standalone, pure-Kotlin multiplatform Zstandard (zstd) codec,
@@ -34,5 +52,6 @@ extracted from [TAKPacket-SDK](https://github.com/meshtastic/TAKPacket-SDK).
 - The `level` parameter is currently a no-op; the encoder uses a single fixed
   greedy/lazy strategy. Frames remain libzstd-compatible regardless.
 
-[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/meshtastic/kzstd/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/meshtastic/kzstd/releases/tag/v0.1.0
