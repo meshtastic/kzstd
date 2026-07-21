@@ -66,7 +66,7 @@ and `explicitApi()`. After an **intentional** public-API change, run
 ## Reusing code from sibling Meshtastic-org projects
 
 kzstd is GPL-3.0, the same license as the other Meshtastic projects, so lifting
-code from them is allowed. When you do: keep the `SPDX-License-Identifier: GPL-3.0-only`
+code from them is allowed. When you do: keep the `SPDX-License-Identifier: GPL-3.0-or-later`
 header, add a copyright line crediting the source repo, and note the origin in the
 commit message (`Origin: <repo>/<path> @ <sha>`).
 

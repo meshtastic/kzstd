@@ -12,6 +12,8 @@ Dependency and toolchain refresh — no codec or public-API changes.
 
 ### Changed
 
+- Relicensed source SPDX headers from GPL-3.0-only to GPL-3.0-or-later
+  (aligns with the Meshtastic org standard; the LICENSE file is unchanged).
 - Built with Kotlin 2.4.10 (was 2.4.0).
 - junit-framework (JVM test suite only) updated to 6.1.2.
 

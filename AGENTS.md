@@ -78,6 +78,6 @@ fallback (`com.github.meshtastic:kzstd`). Releases are tag-driven — see
 
 - Commits are **signed off** (DCO): `git commit -s`. The repo owner prefers to be
   the commit author — do **not** add `Co-Authored-By` trailers.
-- Source files carry an `SPDX-License-Identifier: GPL-3.0-only` header.
+- Source files carry an `SPDX-License-Identifier: GPL-3.0-or-later` header.
 - Commit messages: imperative mood, with a body explaining what + why.
 - Do not auto-commit; stage changes and describe what you did.
