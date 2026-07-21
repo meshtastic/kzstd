@@ -14,6 +14,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  GRADLE_CACHE_URL: ${{ secrets.GRADLE_CACHE_URL }}
+  GRADLE_CACHE_USERNAME: ${{ secrets.GRADLE_CACHE_USERNAME }}
+  GRADLE_CACHE_PASSWORD: ${{ secrets.GRADLE_CACHE_PASSWORD }}
+
 jobs:
   build:
     name: Build, test & API check (all KMP targets)
@@ -33,6 +38,14 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
+
+      - name: Cache Konan (Kotlin/Native toolchain)
+        uses: actions/cache@v6
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            konan-${{ runner.os }}-
 
       # `build` compiles all 13 targets, runs the common/jvm/js/wasm/macOS/iOS-sim
       # tests, and runs `apiCheck` (binary-compatibility-validator). Linux/Windows
