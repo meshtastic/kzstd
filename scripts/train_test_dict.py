@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Generate a small, TAK-free TRAINED zstd dictionary for kzstd's test suite.
 
 Deterministic: a fixed RNG seed produces the same synthetic corpus, so the

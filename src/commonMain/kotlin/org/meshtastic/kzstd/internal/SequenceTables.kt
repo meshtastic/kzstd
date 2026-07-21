@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 package org.meshtastic.kzstd.internal
 
 // ── Symbol-space bounds for the three sequence FSE tables (RFC 8878 §3.1.1.3.2)

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Test fixtures for kzstd. The trained dictionary below is the raw output of
 // `python3 scripts/train_test_dict.py` (re-chunked into Base64 string constants by
 // hand); the corpus and the other constants are hand-authored. The corpus is
