@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.vanniktech.publish)
     alias(libs.plugins.dokka)
     alias(libs.plugins.binary.compat)
+    alias(libs.plugins.kover)
 }
 
 // GROUP / VERSION_NAME come from gradle.properties — the single coordinate source

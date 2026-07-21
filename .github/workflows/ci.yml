@@ -5,10 +5,14 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  merge_group:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -28,10 +32,20 @@ jobs:
           java-version: 21
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       # `build` compiles all 13 targets, runs the common/jvm/js/wasm/macOS/iOS-sim
       # tests, and runs `apiCheck` (binary-compatibility-validator). Linux/Windows
       # native test binaries are cross-compiled but not executed on a macOS host.
       - name: Build, test & API check
         run: ./gradlew build --stacktrace
+
+      - name: Coverage report (Kover XML)
+        run: ./gradlew koverXmlReport
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: build/reports/kover/report.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
