@@ -1,0 +1,30 @@
+// Klib ABI Dump
+// Targets: [iosArm64, iosSimulatorArm64, iosX64, js, linuxArm64, linuxX64, macosArm64, mingwX64, tvosArm64, tvosSimulatorArm64, wasmJs, wasmWasi]
+// Rendering settings:
+// - Signature version: 2
+// - Show manifest properties: true
+// - Show declarations: true
+
+// Library unique name: <org.meshtastic:kzstd>
+final class org.meshtastic.kzstd/ZstdDictionary { // org.meshtastic.kzstd/ZstdDictionary|null[0]
+    constructor <init>(kotlin/ByteArray) // org.meshtastic.kzstd/ZstdDictionary.<init>|<init>(kotlin.ByteArray){}[0]
+
+    final object Companion { // org.meshtastic.kzstd/ZstdDictionary.Companion|null[0]
+        final val EMPTY // org.meshtastic.kzstd/ZstdDictionary.Companion.EMPTY|{}EMPTY[0]
+            final fun <get-EMPTY>(): org.meshtastic.kzstd/ZstdDictionary // org.meshtastic.kzstd/ZstdDictionary.Companion.EMPTY.<get-EMPTY>|<get-EMPTY>(){}[0]
+    }
+}
+
+final class org.meshtastic.kzstd/ZstdException : kotlin/RuntimeException { // org.meshtastic.kzstd/ZstdException|null[0]
+    constructor <init>(kotlin/String, kotlin/Throwable? = ...) // org.meshtastic.kzstd/ZstdException.<init>|<init>(kotlin.String;kotlin.Throwable?){}[0]
+}
+
+final object org.meshtastic.kzstd/Zstd { // org.meshtastic.kzstd/Zstd|null[0]
+    final const val DEFAULT_LEVEL // org.meshtastic.kzstd/Zstd.DEFAULT_LEVEL|{}DEFAULT_LEVEL[0]
+        final fun <get-DEFAULT_LEVEL>(): kotlin/Int // org.meshtastic.kzstd/Zstd.DEFAULT_LEVEL.<get-DEFAULT_LEVEL>|<get-DEFAULT_LEVEL>(){}[0]
+
+    final fun compress(kotlin/ByteArray, kotlin/Int = ...): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.compress|compress(kotlin.ByteArray;kotlin.Int){}[0]
+    final fun compress(kotlin/ByteArray, org.meshtastic.kzstd/ZstdDictionary, kotlin/Int = ...): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.compress|compress(kotlin.ByteArray;org.meshtastic.kzstd.ZstdDictionary;kotlin.Int){}[0]
+    final fun decompress(kotlin/ByteArray, kotlin/Int): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.decompress|decompress(kotlin.ByteArray;kotlin.Int){}[0]
+    final fun decompress(kotlin/ByteArray, org.meshtastic.kzstd/ZstdDictionary, kotlin/Int): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.decompress|decompress(kotlin.ByteArray;org.meshtastic.kzstd.ZstdDictionary;kotlin.Int){}[0]
+}

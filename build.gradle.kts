@@ -91,6 +91,19 @@ kotlin {
     }
 }
 
+// Validate the full cross-platform ABI (klib/native + common), not JVM only.
+// With klib enabled, `apiDump` writes api/kzstd.klib.api (all 12 non-JVM
+// targets) next to the JVM api/kzstd.api, and `apiCheck` validates both.
+// Targets a CI host can't build (the Apple targets on the Linux/Windows
+// runners) are skipped by BCV and trusted from the committed dump; regenerate
+// the full dump on a macOS host via `./gradlew apiDump`.
+apiValidation {
+    @OptIn(kotlinx.validation.ExperimentalBCVApi::class)
+    klib {
+        enabled = true
+    }
+}
+
 // Reproducible archives: stable file order + zeroed timestamps so published
 // artifacts are byte-deterministic across builds.
 tasks.withType<AbstractArchiveTask>().configureEach {
