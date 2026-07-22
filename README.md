@@ -1,6 +1,8 @@
 # kzstd
 
 [![Maven Central](https://img.shields.io/maven-central/v/org.meshtastic/kzstd)](https://central.sonatype.com/artifact/org.meshtastic/kzstd)
+[![CI](https://github.com/meshtastic/kzstd/actions/workflows/ci.yml/badge.svg)](https://github.com/meshtastic/kzstd/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/meshtastic/kzstd/graph/badge.svg)](https://codecov.io/gh/meshtastic/kzstd)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-blue.svg?logo=kotlin)](https://kotlinlang.org)
 
@@ -24,7 +26,7 @@ Linux (x64, arm64), and Windows (mingw-x64).
 
 ```kotlin
 // Maven Central
-implementation("org.meshtastic:kzstd:0.1.0")
+implementation("org.meshtastic:kzstd:0.1.1")
 ```
 
 ## Usage
