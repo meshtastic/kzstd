@@ -1,9 +1,9 @@
 # Codecov configuration — https://docs.codecov.com/docs/codecov-yaml
 #
 # Coverage is measured by Kover on the JVM target only (Kover instruments
-# JVM/Android bytecode; Native/JS/Wasm execution is not counted). Reports are
-# INFORMATIONAL (non-blocking) for now; a koverVerify threshold gate can be
-# added once a baseline is established.
+# JVM/Android bytecode; Native/JS/Wasm execution is not counted). The project
+# status GATES on regression (target: auto, ±1% tolerance); the patch status
+# stays advisory to avoid blocking small PRs.
 coverage:
   precision: 2
   round: down
@@ -11,10 +11,12 @@ coverage:
   status:
     project:
       default:
-        informational: true
+        target: auto         # gate: fail if overall coverage regresses
+        threshold: 1%        # tolerate ≤1% dips (rounding, flaky lines)
+        informational: false
     patch:
       default:
-        informational: true
+        informational: true  # advisory only — don't block small PRs on patch noise
 
 comment:
   layout: "reach, diff, flags"
