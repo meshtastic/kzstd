@@ -13,11 +13,7 @@ import org.meshtastic.kzstd.ZstdException
  * This is pure Kotlin/common — no `java.*`, no `expect/actual` — so the whole
  * decoder can later serve as the wasmWasi `decompress` actual.
  */
-internal class ForwardByteReader(
-    val backingArray: ByteArray,
-    var pos: Int,
-    private val end: Int,
-) {
+internal class ForwardByteReader(val backingArray: ByteArray, var pos: Int, private val end: Int) {
 
     val remaining: Int get() = end - pos
     val endPos: Int get() = end
@@ -104,15 +100,27 @@ internal class ReverseBitReader(private val buf: ByteArray, private val start: I
     private fun leadingZeros8(v: Int): Int {
         var n = 0
         var x = v and 0xFF
-        if (x and 0xF0 == 0) { n += 4; x = x shl 4 }
-        if (x and 0xC0 == 0) { n += 2; x = x shl 2 }
-        if (x and 0x80 == 0) { n += 1; x = x shl 1 }
+        if (x and 0xF0 == 0) {
+            n += 4
+            x = x shl 4
+        }
+        if (x and 0xC0 == 0) {
+            n += 2
+            x = x shl 2
+        }
+        if (x and 0x80 == 0) {
+            n += 1
+            x = x shl 1
+        }
         return n
     }
 
     /** Read the single bit at global index [g], or 0 (with overflow) if g < 0. */
     private fun bitAt(g: Int): Int {
-        if (g < 0) { overflowed = true; return 0 }
+        if (g < 0) {
+            overflowed = true
+            return 0
+        }
         val byteIndex = start + (g ushr 3)
         val bitInByte = g and 7
         return (buf[byteIndex].toInt() ushr bitInByte) and 1

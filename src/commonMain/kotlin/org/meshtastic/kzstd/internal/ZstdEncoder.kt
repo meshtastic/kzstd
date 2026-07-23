@@ -258,7 +258,10 @@ internal object PureZstdEncoder {
                 // Insert all covered positions into the chain for future matches.
                 var q = i + 1
                 val matchEnd = i + len
-                while (q < matchEnd && q + MIN_MATCH <= n) { insert(q); q++ }
+                while (q < matchEnd && q + MIN_MATCH <= n) {
+                    insert(q)
+                    q++
+                }
                 i = matchEnd
                 litStart = i
             } else {
@@ -313,12 +316,14 @@ internal object PureZstdEncoder {
             size < 32 -> {
                 out.add(((size shl 3) or (0 shl 2) or 0).toByte()) // [size:5][00][00]
             }
+
             size < 4096 -> {
                 val b0 = (0) or (0b01 shl 2) or ((size and 0xF) shl 4)
                 val b1 = (size ushr 4) and 0xFF
                 out.add(b0.toByte())
                 out.add(b1.toByte())
             }
+
             else -> {
                 val b0 = (0) or (0b11 shl 2) or ((size and 0xF) shl 4)
                 val b1 = (size ushr 4) and 0xFF
@@ -334,12 +339,18 @@ internal object PureZstdEncoder {
         val nbSeq = sequences.size
         // Number_of_Sequences.
         when {
-            nbSeq == 0 -> { out.add(0); return }
+            nbSeq == 0 -> {
+                out.add(0)
+                return
+            }
+
             nbSeq < 128 -> out.add(nbSeq.toByte())
+
             nbSeq < 0x7F00 -> {
                 out.add((((nbSeq ushr 8) + 128) and 0xFF).toByte())
                 out.add((nbSeq and 0xFF).toByte())
             }
+
             else -> {
                 out.add(0xFF.toByte())
                 val v = nbSeq - 0x7F00
@@ -396,9 +407,12 @@ internal object PureZstdEncoder {
 
     /** Per-sequence FSE symbols + extra-bit payloads. */
     private class Codes(
-        val llCode: Int, val llExtra: Int,
-        val mlCode: Int, val mlExtra: Int,
-        val ofCode: Int, val ofExtra: Int,
+        val llCode: Int,
+        val llExtra: Int,
+        val mlCode: Int,
+        val mlExtra: Int,
+        val ofCode: Int,
+        val ofExtra: Int,
     )
 
     private fun writeExtra(bw: ReverseBitWriter, c: Codes) {
@@ -438,7 +452,10 @@ internal object PureZstdEncoder {
     private fun highBit(v: Int): Int {
         var n = 0
         var x = v
-        while (x > 1) { x = x shr 1; n++ }
+        while (x > 1) {
+            x = x shr 1
+            n++
+        }
         return n
     }
 

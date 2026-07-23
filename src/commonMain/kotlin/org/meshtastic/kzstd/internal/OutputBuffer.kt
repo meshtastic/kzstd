@@ -25,6 +25,7 @@ import org.meshtastic.kzstd.ZstdException
 internal class OutputBuffer(private val dict: ByteArray, private val maxSize: Int) {
 
     private val dictLen = dict.size
+
     // Holds ONLY the frame's own output bytes (no dict prefix). `size` is the
     // virtual position in the `[dict][output]` history; frame bytes occupy
     // indices [0, frameLen) of `out`.
@@ -63,8 +64,7 @@ internal class OutputBuffer(private val dict: ByteArray, private val maxSize: In
      * Resolve a byte at virtual history position [pos] (0 = first dict byte) from
      * either the dictionary prefix or the frame output.
      */
-    private fun byteAt(pos: Int): Byte =
-        if (pos < dictLen) dict[pos] else out[pos - dictLen]
+    private fun byteAt(pos: Int): Byte = if (pos < dictLen) dict[pos] else out[pos - dictLen]
 
     /**
      * Copy a match of [length] bytes from [offset] bytes before the current

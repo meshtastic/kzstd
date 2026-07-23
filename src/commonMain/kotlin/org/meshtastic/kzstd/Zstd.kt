@@ -56,20 +56,18 @@ public object Zstd {
 
     /** Decompress a standard zstd [frame] with no dictionary. */
     @Throws(ZstdException::class)
-    public fun decompress(frame: ByteArray, maxSize: Int): ByteArray =
-        decompress(frame, ZstdDictionary.EMPTY, maxSize)
+    public fun decompress(frame: ByteArray, maxSize: Int): ByteArray = decompress(frame, ZstdDictionary.EMPTY, maxSize)
 
     /**
      * Run [body], letting a [ZstdException] propagate and wrapping any other
      * (non-[Error]) failure in a [ZstdException] so callers catch one type.
      * `Error` (e.g. `OutOfMemoryError`) is intentionally NOT caught.
      */
-    private inline fun wrapFailures(op: String, size: Int, body: () -> ByteArray): ByteArray =
-        try {
-            body()
-        } catch (e: ZstdException) {
-            throw e
-        } catch (e: Exception) {
-            throw ZstdException("zstd $op failed (size=$size): ${e.message ?: e::class.simpleName ?: "unknown"}", e)
-        }
+    private inline fun wrapFailures(op: String, size: Int, body: () -> ByteArray): ByteArray = try {
+        body()
+    } catch (e: ZstdException) {
+        throw e
+    } catch (e: Exception) {
+        throw ZstdException("zstd $op failed (size=$size): ${e.message ?: e::class.simpleName ?: "unknown"}", e)
+    }
 }

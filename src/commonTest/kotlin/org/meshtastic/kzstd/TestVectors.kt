@@ -135,15 +135,17 @@ internal object TestVectors {
 
     /** Round-trip corpus: structured records + edge cases. */
     val corpus: List<ByteArray> = structured + listOf(
-        ByteArray(0),                                   // empty
-        "a".encodeToByteArray(),                        // 1 byte (< MIN_MATCH)
-        "ab".encodeToByteArray(),                       // 2 bytes
-        "abc".encodeToByteArray(),                      // 3 bytes (== MIN_MATCH)
-        "abcd".encodeToByteArray(),                     // 4 bytes
-        ByteArray(5000) { 'A'.code.toByte() },          // highly repetitive
-        ("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod " +
-            "tempor incididunt ut labore et dolore magna aliqua. ").repeat(8).encodeToByteArray(),
-        pseudoRandom(2000),                             // near-incompressible (Raw_Block path)
+        ByteArray(0), // empty
+        "a".encodeToByteArray(), // 1 byte (< MIN_MATCH)
+        "ab".encodeToByteArray(), // 2 bytes
+        "abc".encodeToByteArray(), // 3 bytes (== MIN_MATCH)
+        "abcd".encodeToByteArray(), // 4 bytes
+        ByteArray(5000) { 'A'.code.toByte() }, // highly repetitive
+        (
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod " +
+                "tempor incididunt ut labore et dolore magna aliqua. "
+            ).repeat(8).encodeToByteArray(),
+        pseudoRandom(2000), // near-incompressible (Raw_Block path)
     )
 
     /**
@@ -162,8 +164,7 @@ internal object TestVectors {
         "7b2274797065223a22686561727462656174222c22736571223a3634383838362c226e6f6465223a226e6f64652d3233222c227374617465223a226f6b222c226c6174223a2d36382e32303131302c226c6f6e223a2d32352e36383235352c226d7367223a22726567696f6e20616e64206e6f6d696e616c206e6f6d696e616c206d6f6e69746f7265642074686520746865227d",
     )
 
-    private fun hexToBytes(s: String): ByteArray =
-        ByteArray(s.length / 2) { ((s[it * 2].digitToInt(16) shl 4) or s[it * 2 + 1].digitToInt(16)).toByte() }
+    private fun hexToBytes(s: String): ByteArray = ByteArray(s.length / 2) { ((s[it * 2].digitToInt(16) shl 4) or s[it * 2 + 1].digitToInt(16)).toByte() }
 
     /** Deterministic pseudo-random bytes (a 32-bit LCG) — incompressible-ish input. */
     private fun pseudoRandom(n: Int): ByteArray {
