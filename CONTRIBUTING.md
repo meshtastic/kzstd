@@ -40,11 +40,17 @@ signed off. To fix retroactively: `git rebase --signoff HEAD~N && git push --for
 | JVM tests (incl. the zstd-jni interop oracle) | `./gradlew jvmTest` |
 | API surface check | `./gradlew apiCheck` |
 | API surface dump (after an intended change) | `./gradlew apiDump` |
+| Reformat Kotlin (Spotless/ktlint) | `./gradlew spotlessApply` |
+| Formatting + static-analysis gate | `./gradlew spotlessCheck detekt` |
 | Regenerate the trained test dictionary | `python3 scripts/train_test_dict.py` |
 
-Static formatting/analysis (spotless + detekt, as used by larger meshtastic KMP
-SDKs) is not yet wired into the build — `.editorconfig` documents the intended
-Kotlin style in the meantime. Wiring it in is a welcome contribution.
+Formatting (Spotless/ktlint) and static analysis (detekt) are wired into the build
+and gated in CI. ktlint reads `.editorconfig`, so that file remains the single
+source of Kotlin style. Run `./gradlew spotlessApply` to auto-format before
+committing. Pre-existing findings in the RFC 8878 engine (lifted verbatim from
+TAKPacket-SDK) are recorded in `config/detekt/baseline.xml`; the gate blocks *new*
+issues. Regenerate the baseline after intentionally clearing engine findings with
+`./gradlew detektBaseline`.
 
 ## Public API changes
 

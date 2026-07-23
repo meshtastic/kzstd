@@ -21,7 +21,9 @@ import org.meshtastic.kzstd.internal.ParsedDictionary
  * immutable after construction and safe to share across threads — concurrent
  * compress/decompress calls with the same instance need no synchronization.
  */
-public class ZstdDictionary @Throws(ZstdException::class) constructor(bytes: ByteArray) {
+public class ZstdDictionary
+@Throws(ZstdException::class)
+constructor(bytes: ByteArray) {
     internal val parsed: ParsedDictionary
     internal val matchIndex: MatchIndex
 

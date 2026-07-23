@@ -59,8 +59,7 @@ internal class MatchIndex private constructor(
         internal const val MAX_CANDIDATES = 32
 
         @PublishedApi
-        internal fun hash(v: Int): Int =
-            ((v * -1640531527) ushr (32 - HASH_LOG)) and (HASH_SIZE - 1)
+        internal fun hash(v: Int): Int = ((v * -1640531527) ushr (32 - HASH_LOG)) and (HASH_SIZE - 1)
 
         /** Build a hash-chain index over [content]. Called once per dictionary. */
         internal fun build(content: ByteArray): MatchIndex {

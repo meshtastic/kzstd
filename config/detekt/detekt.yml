@@ -1,0 +1,40 @@
+# detekt configuration for kzstd. Layered on top of detekt's default rules
+# (build.gradle.kts sets buildUponDefaultConfig = true), so this file only
+# records the deliberate deviations.
+#
+# Formatting is owned by Spotless/ktlint (which reads .editorconfig), so the
+# detekt `formatting` ruleset and line-length style checks are left to ktlint to
+# avoid two tools fighting over the same concern.
+
+style:
+  # Line length is enforced by ktlint via .editorconfig (max_line_length = 120,
+  # with a per-file override for the Base64/hex fixtures in TestVectors.kt).
+  MaxLineLength:
+    active: false
+  # The codec engine uses explicit magic numbers from RFC 8878 (FSE/Huffman
+  # tables, frame headers); flagging every one of them is pure noise.
+  MagicNumber:
+    active: false
+  ReturnCount:
+    active: false
+
+complexity:
+  # The RFC 8878 encoder/decoder are inherently long, branchy state machines
+  # extracted verbatim from the reference implementation; the default thresholds
+  # are tuned for application code, not codec internals.
+  LongMethod:
+    active: false
+  CyclomaticComplexMethod:
+    active: false
+  NestedBlockDepth:
+    active: false
+  LongParameterList:
+    active: false
+  ComplexCondition:
+    active: false
+  TooManyFunctions:
+    active: false
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false

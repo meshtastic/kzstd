@@ -64,7 +64,8 @@ internal class ParsedDictionary private constructor(
             val huffman = parseHuffmanTable(reader)
             val offsetFse = parseFseTable(reader, maxLog = OFFSET_MAX_LOG, maxSymbol = OFFSET_MAX_SYMBOL)
             val matchFse = parseFseTable(reader, maxLog = MATCH_LENGTH_MAX_LOG, maxSymbol = MATCH_LENGTH_MAX_SYMBOL)
-            val litLenFse = parseFseTable(reader, maxLog = LITERAL_LENGTH_MAX_LOG, maxSymbol = LITERAL_LENGTH_MAX_SYMBOL)
+            val litLenFse =
+                parseFseTable(reader, maxLog = LITERAL_LENGTH_MAX_LOG, maxSymbol = LITERAL_LENGTH_MAX_SYMBOL)
 
             // Three 4-byte little-endian repeat offsets.
             val rep = IntArray(3)
@@ -83,10 +84,9 @@ internal class ParsedDictionary private constructor(
             )
         }
 
-        private fun leInt(b: ByteArray, off: Int): Int =
-            (b[off].toInt() and 0xFF) or
-                ((b[off + 1].toInt() and 0xFF) shl 8) or
-                ((b[off + 2].toInt() and 0xFF) shl 16) or
-                ((b[off + 3].toInt() and 0xFF) shl 24)
+        private fun leInt(b: ByteArray, off: Int): Int = (b[off].toInt() and 0xFF) or
+            ((b[off + 1].toInt() and 0xFF) shl 8) or
+            ((b[off + 2].toInt() and 0xFF) shl 16) or
+            ((b[off + 3].toInt() and 0xFF) shl 24)
     }
 }

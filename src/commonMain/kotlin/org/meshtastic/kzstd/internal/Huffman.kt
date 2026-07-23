@@ -113,7 +113,10 @@ internal class HuffmanTable(
         private fun highBit(v: Int): Int {
             var n = 0
             var x = v
-            while (x > 1) { x = x shr 1; n++ }
+            while (x > 1) {
+                x = x shr 1
+                n++
+            }
             return n
         }
     }
@@ -226,7 +229,9 @@ internal fun decodeWeightStream(fseTable: FseTable, br: ReverseBitReader): IntAr
         // transition to advance. (An earlier guard threw on any non-advancing
         // transition; that was a false positive — it rejected valid trained
         // dictionaries whose weight FSE table contains 0-bit states.)
-        val t = current; current = other; other = t
+        val t = current
+        current = other
+        other = t
     }
     return IntArray(collected.size) { collected[it] }
 }

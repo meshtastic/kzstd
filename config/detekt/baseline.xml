@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>FunctionOnlyReturningConstant:ZstdEncoder.kt$PureZstdEncoder$private fun frameHeaderDescriptor(): Byte</ID>
+    <ID>LoopWithTooManyJumpStatements:ZstdEncoder.kt$PureZstdEncoder$while</ID>
+    <ID>MatchingDeclarationName:BitWriter.kt$ReverseBitWriter</ID>
+    <ID>MatchingDeclarationName:FseEncoder.kt$FseEncTable</ID>
+    <ID>MatchingDeclarationName:Huffman.kt$HuffmanTable</ID>
+    <ID>MatchingDeclarationName:ZstdDecoder.kt$PureZstdDecoder</ID>
+    <ID>MatchingDeclarationName:ZstdEncoder.kt$PureZstdEncoder</ID>
+    <ID>ThrowsCount:Huffman.kt$HuffmanTable.Companion$fun fromWeights(weights: IntArray, numSymbols: Int): HuffmanTable</ID>
+    <ID>ThrowsCount:ZstdDecoder.kt$PureZstdDecoder$private fun decodeSequences( reader: ForwardByteReader, blockEnd: Int, literals: ByteArray, out: OutputBuffer, state: DecodeState, )</ID>
+    <ID>UnusedParameter:ZstdDecoder.kt$PureZstdDecoder$blockEnd: Int</ID>
+    <ID>UnusedPrivateProperty:OutputBuffer.kt$OutputBuffer$i</ID>
+  </CurrentIssues>
+</SmellBaseline>
