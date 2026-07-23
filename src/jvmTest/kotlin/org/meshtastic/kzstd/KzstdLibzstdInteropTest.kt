@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package org.meshtastic.kzstd
 
-import com.github.luben.zstd.Zstd as LibZstd
 import com.github.luben.zstd.ZstdDictCompress
 import com.github.luben.zstd.ZstdDictDecompress
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertTrue
+import com.github.luben.zstd.Zstd as LibZstd
 
 /**
  * The both-directions interop oracle (R6): kzstd's pure-Kotlin frames must decode
@@ -73,7 +73,10 @@ class KzstdLibzstdInteropTest {
         // treeless frame — and that the committed cross-target fixture is itself treeless.
         val cdict = ZstdDictCompress(dictBytes, Zstd.DEFAULT_LEVEL)
         val treeless = TestVectors.structured.count { firstBlockLitType(LibZstd.compress(it, cdict)) == 3 }
-        assertTrue(treeless > 0, "libzstd emitted no treeless (dict-Huffman) frames — dict-entropy decode path untested")
+        assertTrue(
+            treeless > 0,
+            "libzstd emitted no treeless (dict-Huffman) frames — dict-entropy decode path untested",
+        )
         assertTrue(
             firstBlockLitType(TestVectors.treelessDictFrame) == 3,
             "the committed treelessDictFrame is not actually treeless",
@@ -83,13 +86,24 @@ class KzstdLibzstdInteropTest {
     /** Literals_Block_Type of the first block (RFC 8878), or -1 if not a Compressed block. */
     private fun firstBlockLitType(frame: ByteArray): Int {
         var p = 4 // skip frame magic
-        val fhd = frame[p].toInt() and 0xFF; p++
+        val fhd = frame[p].toInt() and 0xFF
+        p++
         val fcsFlag = (fhd ushr 6) and 0x3
         val singleSegment = (fhd ushr 5) and 0x1
         val dictIdFlag = fhd and 0x3
         if (singleSegment == 0) p++ // window descriptor
-        p += when (dictIdFlag) { 0 -> 0; 1 -> 1; 2 -> 2; else -> 4 }
-        p += when (fcsFlag) { 0 -> if (singleSegment == 1) 1 else 0; 1 -> 2; 2 -> 4; else -> 8 }
+        p += when (dictIdFlag) {
+            0 -> 0
+            1 -> 1
+            2 -> 2
+            else -> 4
+        }
+        p += when (fcsFlag) {
+            0 -> if (singleSegment == 1) 1 else 0
+            1 -> 2
+            2 -> 4
+            else -> 8
+        }
         val bh = (frame[p].toInt() and 0xFF) or ((frame[p + 1].toInt() and 0xFF) shl 8) or
             ((frame[p + 2].toInt() and 0xFF) shl 16)
         val blockType = (bh ushr 1) and 0x3

@@ -59,6 +59,7 @@ internal class FseTable(
                         highThreshold--
                         symbolNext[s] = 1
                     }
+
                     else -> symbolNext[s] = normalizedCounts[s]
                 }
             }
@@ -110,7 +111,10 @@ internal class FseTable(
         private fun highBit(v: Int): Int {
             var n = 0
             var x = v
-            while (x > 1) { x = x shr 1; n++ }
+            while (x > 1) {
+                x = x shr 1
+                n++
+            }
             return n
         }
     }
@@ -156,11 +160,7 @@ internal class FseState(private val table: FseTable) {
  * remaining probability budget, with a run-length escape for streaks of zero
  * counts.
  */
-internal fun parseFseTable(
-    reader: ForwardByteReader,
-    maxLog: Int,
-    maxSymbol: Int,
-): FseTable {
+internal fun parseFseTable(reader: ForwardByteReader, maxLog: Int, maxSymbol: Int): FseTable {
     val bits = ForwardBitReader(reader)
 
     // This mirrors the reference `FSE_readNCount`. `remaining` tracks the

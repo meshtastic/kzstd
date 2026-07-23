@@ -8,6 +8,8 @@ plugins {
     alias(libs.plugins.dokka)
     alias(libs.plugins.binary.compat)
     alias(libs.plugins.kover)
+    alias(libs.plugins.spotless)
+    alias(libs.plugins.detekt)
 }
 
 // GROUP / VERSION_NAME come from gradle.properties — the single coordinate source
@@ -113,6 +115,33 @@ tasks.withType<AbstractArchiveTask>().configureEach {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Code quality: Spotless (ktlint formatting) + detekt (static analysis).
+// ktlint honors the repo `.editorconfig`, so the two stay in one style source of
+// truth. `spotlessApply` reformats; `spotlessCheck` + `detekt` gate CI.
+spotless {
+    kotlin {
+        target("src/**/*.kt")
+        ktlint(libs.versions.ktlint.get())
+    }
+    kotlinGradle {
+        target("*.gradle.kts")
+        ktlint(libs.versions.ktlint.get())
+    }
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+    // Pre-existing findings in the RFC 8878 engine (lifted verbatim from
+    // TAKPacket-SDK) are captured in a baseline so the gate blocks NEW issues
+    // while the engine is cleaned up incrementally. Regenerate: ./gradlew detektBaseline
+    baseline = file("$rootDir/config/detekt/baseline.xml")
+    // KMP has no `main`/`test` source sets, so point detekt at the source tree
+    // directly (it recurses for *.kt/*.kts).
+    source.setFrom(files("src"))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -20,6 +20,13 @@ ktlint_standard_filename = disabled
 ktlint_standard_no-wildcard-imports = enabled
 ktlint_code_style = intellij_idea
 
+# The committed trained-dictionary / test-vector fixtures are chunked Base64 and
+# hex string constants that intentionally exceed max_line_length; wrapping them
+# would obscure the fixture. Turn the line-length rule off for that file only.
+[**/TestVectors.kt]
+max_line_length = off
+ktlint_standard_max-line-length = disabled
+
 [*.{yml,yaml,json,toml}]
 indent_size = 2
 

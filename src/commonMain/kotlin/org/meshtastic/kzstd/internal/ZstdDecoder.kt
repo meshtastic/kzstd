@@ -70,13 +70,16 @@ internal object PureZstdDecoder {
                 0 -> { // Raw_Block: literal bytes copied verbatim.
                     for (i in 0 until blockSize) out.appendByte(reader.readByte())
                 }
+
                 1 -> { // RLE_Block: one byte repeated blockSize times.
                     val b = reader.readByte()
                     for (i in 0 until blockSize) out.appendByte(b)
                 }
+
                 2 -> { // Compressed_Block.
                     decodeCompressedBlock(reader, blockSize, out, state, maxSize)
                 }
+
                 else -> throw ZstdException("reserved block type $blockType")
             }
 
@@ -102,7 +105,10 @@ internal object PureZstdDecoder {
 
         // Dictionary_ID field, 0/1/2/4 bytes.
         val dictIdBytes = when (dictIdFlag) {
-            0 -> 0; 1 -> 1; 2 -> 2; else -> 4
+            0 -> 0
+            1 -> 1
+            2 -> 2
+            else -> 4
         }
         if (dictIdBytes > 0) reader.readLEInt(dictIdBytes)
 
@@ -168,8 +174,12 @@ internal object PureZstdDecoder {
     ): ByteArray {
         // Regenerated_Size width depends on size_format.
         val regenSize: Int = when (sizeFormat) {
-            0, 2 -> first ushr 3 // 5-bit size, low form (sizeFormat bit0 == 0)
-            1 -> (first ushr 4) or (reader.readByte() shl 4) // 12-bit
+            0, 2 -> first ushr 3
+
+            // 5-bit size, low form (sizeFormat bit0 == 0)
+            1 -> (first ushr 4) or (reader.readByte() shl 4)
+
+            // 12-bit
             else -> (first ushr 4) or (reader.readByte() shl 4) or (reader.readByte() shl 12) // 20-bit
         }
         // A 20-bit Regenerated_Size can request ~1 MB; reject before allocating
@@ -207,6 +217,7 @@ internal object PureZstdDecoder {
                 compressedSize = (b1 ushr 6) or (b2 shl 2)
                 fourStreams = false
             }
+
             1 -> { // 4 streams, 10-bit sizes
                 val b1 = reader.readByte()
                 val b2 = reader.readByte()
@@ -214,6 +225,7 @@ internal object PureZstdDecoder {
                 compressedSize = (b1 ushr 6) or (b2 shl 2)
                 fourStreams = true
             }
+
             2 -> { // 4 streams, 14-bit sizes
                 val b1 = reader.readByte()
                 val b2 = reader.readByte()
@@ -222,6 +234,7 @@ internal object PureZstdDecoder {
                 compressedSize = (b2 ushr 2) or (b3 shl 6)
                 fourStreams = true
             }
+
             else -> { // 4 streams, 18-bit sizes
                 val b1 = reader.readByte()
                 val b2 = reader.readByte()
@@ -328,8 +341,11 @@ internal object PureZstdDecoder {
                 reader.pos = blockEnd
                 return
             }
+
             nbSeq < 128 -> { /* value is nbSeq */ }
+
             nbSeq < 255 -> nbSeq = ((nbSeq - 128) shl 8) + reader.readByte()
+
             else -> nbSeq = reader.readByte() + (reader.readByte() shl 8) + 0x7F00
         }
 
@@ -424,22 +440,21 @@ internal object PureZstdDecoder {
      * (parse a table here), 3 = Repeat (reuse the dict's / previous block's
      * table). The reader is advanced for RLE and FSE_Compressed modes.
      */
-    private fun resolveTable(
-        reader: ForwardByteReader,
-        mode: Int,
-        kind: SeqKind,
-        state: DecodeState,
-    ): FseTable = when (mode) {
-        0 -> kind.predefined()
-        1 -> {
-            // RLE: a single byte is the only symbol (probability 1.0), tableLog 0.
-            val symbol = reader.readByte()
-            rleTable(symbol)
+    private fun resolveTable(reader: ForwardByteReader, mode: Int, kind: SeqKind, state: DecodeState): FseTable =
+        when (mode) {
+            0 -> kind.predefined()
+
+            1 -> {
+                // RLE: a single byte is the only symbol (probability 1.0), tableLog 0.
+                val symbol = reader.readByte()
+                rleTable(symbol)
+            }
+
+            2 -> parseFseTable(reader, kind.maxLog, kind.maxSymbol)
+
+            else -> kind.repeat(state)
+                ?: throw ZstdException("repeat mode for ${kind.name} but no prior/dict table")
         }
-        2 -> parseFseTable(reader, kind.maxLog, kind.maxSymbol)
-        else -> kind.repeat(state)
-            ?: throw ZstdException("repeat mode for ${kind.name} but no prior/dict table")
-    }
 
     private fun rleTable(symbol: Int): FseTable {
         // One-state table: always emits `symbol`, consumes 0 bits, stays in
@@ -471,28 +486,39 @@ internal object PureZstdDecoder {
         val repCode = if (literalLength == 0) offsetValue else offsetValue - 1
         return when (repCode) {
             0 -> rep[0]
+
             1 -> {
                 val v = rep[1]
-                rep[1] = rep[0]; rep[0] = v
+                rep[1] = rep[0]
+                rep[0] = v
                 v
             }
+
             2 -> {
                 val v = rep[2]
-                rep[2] = rep[1]; rep[1] = rep[0]; rep[0] = v
+                rep[2] = rep[1]
+                rep[1] = rep[0]
+                rep[0] = v
                 v
             }
+
             else -> {
                 // repCode == 3 only reachable when literalLength == 0 and
                 // offsetValue == 3: actual = rep[0] - 1.
                 val v = rep[0] - 1
-                rep[2] = rep[1]; rep[1] = rep[0]; rep[0] = v
+                rep[2] = rep[1]
+                rep[1] = rep[0]
+                rep[0] = v
                 v
             }
         }
     }
 
     private enum class SeqKind {
-        LITERAL_LENGTH, OFFSET, MATCH_LENGTH;
+        LITERAL_LENGTH,
+        OFFSET,
+        MATCH_LENGTH,
+        ;
 
         val maxLog: Int get() = when (this) {
             LITERAL_LENGTH -> LITERAL_LENGTH_MAX_LOG
