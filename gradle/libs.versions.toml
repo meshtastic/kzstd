@@ -10,7 +10,7 @@ kover = "0.9.9"
 vanniktech-publish = "0.37.0"
 junit-jupiter = "6.1.2"
 junit-platform = "6.1.2"
-spotless = "8.8.0"
+spotless = "8.9.0"
 ktlint = "1.8.0"
 detekt = "1.23.8"
 
