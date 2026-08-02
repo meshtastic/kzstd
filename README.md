@@ -5,6 +5,7 @@
 [![codecov](https://codecov.io/gh/meshtastic/kzstd/graph/badge.svg)](https://codecov.io/gh/meshtastic/kzstd)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-blue.svg?logo=kotlin)](https://kotlinlang.org)
+[![Revved up by Develocity](https://img.shields.io/badge/Revved%20up%20by-Develocity-06A0CE?logo=Gradle&labelColor=02303A)](https://community.develocity.cloud/scans?search.rootProjectNames=kzstd)
 
 A pure-Kotlin, multiplatform [Zstandard](https://facebook.github.io/zstd/) (zstd)
 codec with dictionary support. It produces and reads **standard zstd frames** that
