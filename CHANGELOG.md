@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2]
+
+Dependency and toolchain refresh, plus CI/quality hardening — no codec or public-API changes.
+
+### Added
+
+- CodeQL and OpenSSF Scorecard scanning (#17).
+- A Dokka API docs site, published to GitHub Pages (#18).
+- klib ABI validation across every target, not just JVM (#16).
+- A remote HTTP build cache plus Konan (Kotlin/Native toolchain) caching in CI (#15).
+- A Spotless/detekt quality gate and a dedicated Linux test leg (#28).
+- Non-gating Codecov coverage upload, later gated on regression (#24).
+- Onboarded to the OSS Community Develocity instance for Build Scans and remote caching
+  (#36), then restricted cache writes to trusted events only (#37).
+- Funding and issue templates (#22).
+
+### Changed
+
+- Built with Gradle 9.7.0 (was 9.6.1, itself bumped from 9.5.x this cycle) (#26, #40).
+- Every third-party GitHub Action is now pinned to a full commit SHA (#25).
+- `com.github.luben:zstd-jni` (JVM-only interop test dependency) updated to 1.5.7-13 (#30, #43).
+- `com.diffplug.spotless` updated to 8.9.0 (#31); `junit-framework` (JVM test suite) to 6.1.3 (#42).
+- Renormalized `gradlew.bat` line endings so a fresh clone is clean on Windows (#33).
+
+### Security
+
+- Pinned yarn `resolution()` floors for the Kotlin/JS test harness, clearing open Dependabot
+  alerts (#21). Dev-time only; nothing under `kotlin-js-store/` ships in published artifacts.
+- Pinned the Gradle wrapper checksum (#22).
+
 ## [0.1.1]
 
 Dependency and toolchain refresh — no codec or public-API changes.
