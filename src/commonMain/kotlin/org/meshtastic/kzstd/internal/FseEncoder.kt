@@ -80,6 +80,18 @@ internal class FseEncTable private constructor(
      */
     fun initialState(symbol: Int): Int = symbolStates[symbol].first()
 
+    /**
+     * Whether [symbol] has at least one decode-state assigned nonzero
+     * probability in this table -- i.e. whether [encode]/[initialState] can
+     * actually emit it. A table derived from a real distribution (dictionary
+     * or predefined) commonly has zero probability for symbols its source
+     * distribution never used; callers choosing between a dict-trained
+     * "Repeat" table and the always-total Predefined table MUST check this
+     * for every symbol they intend to emit before committing to the
+     * dict-trained one.
+     */
+    fun isCovered(symbol: Int): Boolean = symbol in symbolStates.indices && symbolStates[symbol].isNotEmpty()
+
     /** Write the final [state] (the decoder's initial-state read) as `tableLog` bits. */
     fun flushState(bw: ReverseBitWriter, state: Int) {
         bw.writeBits(state, tableLog)
