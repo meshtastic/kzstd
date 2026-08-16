@@ -13,12 +13,14 @@ import com.github.luben.zstd.Zstd as LibZstd
  * under real libzstd, and kzstd must decode real libzstd's frames — with and
  * without a dictionary.
  *
- * The [libzstdWithTrainedDictDecodesUnderKzstd] direction is also the only thing
- * that exercises kzstd's dictionary-entropy DECODE path: kzstd's own encoder emits
- * Predefined-FSE + Raw-literals frames, so it never produces the treeless-literals
- * / FSE-repeat / repeat-offset-seeded frames that reference a dictionary's entropy
- * tables. libzstd, compressing training-distribution data WITH the trained dict,
- * does — and kzstd must decode them (the P1 guard from the architecture review).
+ * [kzstdFramesDecodeUnderLibzstd_withDict] is now also where kzstd's OWN
+ * dict-entropy encode paths (repeat-offset codes, FSE-repeat sequences,
+ * Treeless Huffman literals) get validated against a real, independent
+ * decoder -- not just kzstd's own decoder round-tripping its own output.
+ * [libzstdWithTrainedDictDecodesUnderKzstd] remains the reverse check: it's
+ * still the only thing that exercises kzstd's dictionary-entropy DECODE path
+ * against every combination libzstd might choose that kzstd's own encoder
+ * doesn't (e.g. 4-stream Huffman literals, out of scope for this encoder).
  */
 class KzstdLibzstdInteropTest {
 

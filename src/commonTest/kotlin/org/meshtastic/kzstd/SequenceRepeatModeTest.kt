@@ -48,7 +48,7 @@ class SequenceRepeatModeTest {
         // also cross-checked against ByteIdenticalRegressionTest's pinned
         // hex). Refresh (never loosen without a reason) if a later,
         // deliberate change legitimately shrinks or grows output.
-        val maxSizes = intArrayOf(54, 52, 55, 58, 55, 59)
+        val maxSizes = intArrayOf(48, 46, 49, 52, 54, 54)
         TestVectors.structured.forEachIndexed { i, sample ->
             val size = Zstd.compress(sample, dict).size
             assertTrue(
@@ -61,9 +61,9 @@ class SequenceRepeatModeTest {
     /**
      * Parses just far enough into a kzstd-produced frame's first (and only)
      * block to read the Sequences_Section's Symbol_Compression_Modes byte,
-     * returning (llMode, ofMode, mlMode). Assumes Raw literals (litType 0) --
-     * the only literals type kzstd's own encoder emits today (treeless
-     * dict-Huffman literals are a later, separate workstream) -- and a
+     * returning (llMode, ofMode, mlMode). Handles Raw literals (litType 0) and
+     * Huffman-coded literals with size_format 0 (litType 2 or 3, single
+     * stream) -- the only forms kzstd's own encoder produces. Assumes a
      * Compressed block, which is always what a dict-trained corpus produces.
      */
     private fun firstBlockSequenceModes(frame: ByteArray): Triple<Int, Int, Int> {
@@ -95,33 +95,63 @@ class SequenceRepeatModeTest {
         check(blockType == 2) { "expected a Compressed_Block (2), got $blockType" }
         p += 3
 
-        // Literals_Section_Header for Raw/RLE (RFC 8878 3.1.1.3.1): litType is
-        // bits 0-1. Size_Format is 1 or 2 bits, read PROGRESSIVELY -- bit 2
-        // alone selects the 1-byte/5-bit-size form (0), in which case bit 3 is
+        // Literals_Section_Header (RFC 8878 §3.1.1.3.1): litType is bits 0-1.
+        // Size_Format is 1 or 2 bits, read PROGRESSIVELY -- bit 2 alone
+        // selects the 1-byte/5-bit-size form (0), in which case bit 3 is
         // already part of the size field, NOT a second format bit; only when
-        // bit 2 is 1 does bit 3 additionally distinguish the 2-byte (0) vs
-        // 3-byte (1) forms. Reading bits 2-3 together as a flat 2-bit field
-        // (as litType's own 2-bit field can be) is WRONG here -- it would
-        // misread the 1-byte form's size-bit-3 as a bogus second format bit
-        // whenever that size bit happens to be 1.
+        // bit 2 is 1 does bit 3 additionally distinguish between forms.
+        // Reading bits 2-3 together as a flat 2-bit field (as litType's own
+        // 2-bit field can be) is WRONG here.
         val litB0 = frame[p].toInt() and 0xFF
         val litType = litB0 and 0x3
-        check(litType == 0) { "expected Raw literals (litType 0), got $litType -- update this helper" }
+
         val headerLen: Int
-        val regenSize: Int
-        if ((litB0 ushr 2) and 0x1 == 0) {
-            headerLen = 1
-            regenSize = litB0 ushr 3
-        } else if ((litB0 ushr 3) and 0x1 == 0) {
-            headerLen = 2
-            regenSize = ((litB0 ushr 4) and 0xF) or ((frame[p + 1].toInt() and 0xFF) shl 4)
-        } else {
-            headerLen = 3
-            regenSize = ((litB0 ushr 4) and 0xF) or
-                ((frame[p + 1].toInt() and 0xFF) shl 4) or
-                ((frame[p + 2].toInt() and 0xFF) shl 12)
+        val literalsLen: Int
+
+        when (litType) {
+            0 -> { // Raw literals
+                if ((litB0 ushr 2) and 0x1 == 0) {
+                    headerLen = 1
+                    literalsLen = litB0 ushr 3
+                } else if ((litB0 ushr 3) and 0x1 == 0) {
+                    headerLen = 2
+                    literalsLen = ((litB0 ushr 4) and 0xF) or ((frame[p + 1].toInt() and 0xFF) shl 4)
+                } else {
+                    headerLen = 3
+                    literalsLen = ((litB0 ushr 4) and 0xF) or
+                        ((frame[p + 1].toInt() and 0xFF) shl 4) or
+                        ((frame[p + 2].toInt() and 0xFF) shl 12)
+                }
+            }
+
+            2, 3 -> { // Compressed (2) / Treeless (3) Huffman literals
+                // Unlike Raw/RLE above, Size_Format for Huffman-coded literals
+                // is a genuine flat 2-bit field (0/1/2/3 are 4 DISTINCT forms:
+                // single-stream-10-bit, 4-stream-10-bit, 4-stream-14-bit,
+                // 4-stream-18-bit) -- there is no bit2-alone shortcut here.
+                // kzstd's own encoder (this PR) only ever emits size_format 0
+                // (single stream, <= 1023-byte payloads); the rest are out of
+                // scope for this helper since this encoder never produces them.
+                val sizeFormat = (litB0 ushr 2) and 0x3
+                if (sizeFormat == 0) {
+                    headerLen = 3
+                    val b1 = frame[p + 1].toInt() and 0xFF
+                    val b2 = frame[p + 2].toInt() and 0xFF
+                    literalsLen = (b1 ushr 6) or (b2 shl 2)
+                } else {
+                    throw UnsupportedOperationException(
+                        "Huffman literals (litType $litType) with size_format $sizeFormat (4-stream layout) " +
+                            "not parsed by this helper",
+                    )
+                }
+            }
+
+            else -> {
+                throw UnsupportedOperationException("litType $litType not supported by this helper")
+            }
         }
-        p += headerLen + regenSize
+
+        p += headerLen + literalsLen
 
         // Sequences_Section: Number_of_Sequences (1/2/3-byte), then the
         // Symbol_Compression_Modes byte.

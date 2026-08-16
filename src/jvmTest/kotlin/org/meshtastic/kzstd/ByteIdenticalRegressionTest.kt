@@ -40,8 +40,7 @@ class ByteIdenticalRegressionTest {
             "structured, dict-less",
         )
         assertEquals(
-            "28b52ffd00206d010088363438383836382e3232352e363832353509fc" +
-                "8f4708340271bbc05542a21a1d58a8d012b3f3ee53c5c60b12",
+            "28b52ffd00203d010013410299c65a6956accc8c1a09fc8f4708340271bbc05542a21a1d58a8d012b3f3ee53c5c60b12",
             hex(Zstd.compress(TestVectors.structured[0], dict)),
             "structured, trained dict",
         )
