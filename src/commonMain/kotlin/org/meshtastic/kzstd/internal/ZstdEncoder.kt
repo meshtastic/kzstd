@@ -64,25 +64,27 @@ internal object PureZstdEncoder {
 
     /**
      * Encode [data] into a complete zstd frame using [dict] (parsed entropy
-     * tables + content) and its [index] as match history. [level] is accepted
-     * for API symmetry; the pure encoder uses a single fixed greedy/lazy strategy
-     * (it does not implement zstd's 22 levels).
+     * tables + content) and its [index] as match history. [level] governs
+     * ONLY match-finding effort ([searchDepthFor]: how many candidate
+     * distances the matcher examines per position) -- it does not gate
+     * entropy-table choice (dict-entropy reuse from the Repeat-mode /
+     * Treeless-literals work is unconditional whenever the dict's tables are
+     * covered, independent of `level`) or implement zstd's other 21 levels'
+     * distinct strategies/parameters (windowLog, targetLength, etc.); this
+     * encoder uses a single fixed greedy/lazy strategy at every level, just
+     * with a shallower or deeper search.
      */
-    fun encode(
-        data: ByteArray,
-        dict: ParsedDictionary,
-        index: MatchIndex,
-        @Suppress("UNUSED_PARAMETER") level: Int = 19,
-    ): ByteArray {
+    fun encode(data: ByteArray, dict: ParsedDictionary, index: MatchIndex, level: Int = 19): ByteArray {
         if (data.size > MAX_BLOCK_SIZE) {
             throw ZstdException(
                 "input ${data.size} exceeds the single-block limit of $MAX_BLOCK_SIZE bytes; " +
                     "kzstd emits one block per frame — multi-block encoding is not yet supported",
             )
         }
+        val depth = searchDepthFor(level)
         // Build the literal+sequence program by matching `data` against the
         // combined [dictContent ++ data] history.
-        val program = buildSequences(data, dict, index)
+        val program = buildSequences(data, dict, index, depth)
 
         // Encode the single block. If it does not beat raw, fall back to a Raw
         // block (still a valid frame).
@@ -142,12 +144,52 @@ internal object PureZstdEncoder {
     private class Program(val sequences: List<Seq>, val literals: ByteArray)
 
     /**
+     * Per-`level` match-finding effort: how many candidate distances the
+     * matcher examines per position, for the input chain ([maxChain]) and the
+     * dictionary's cached index ([maxCandidates]) respectively. Purely a
+     * search-depth knob -- never gates entropy-table choice or the encoder's
+     * strategy, and never changes what a valid sequence stream can contain,
+     * only which candidate match gets chosen.
+     */
+    internal class SearchDepth(val maxChain: Int, val maxCandidates: Int)
+
+    /**
+     * Map `level` (nominally 1..22, zstd's public range) to a [SearchDepth].
+     * `level` == 19 (`Zstd.DEFAULT_LEVEL`) MUST map to exactly (64, 32) --
+     * today's fixed values -- so compressing at the default level produces
+     * byte-identical output to before this mapping existed. Out-of-range
+     * values are clamped rather than rejected, matching real zstd's tolerance
+     * for level requests outside its advertised range. The top tier is capped
+     * (256, 128) rather than left to grow further, per the plan's CPU-blowup
+     * concern for highly repetitive payloads at high effort. `internal` (not
+     * `private`) so tests can verify the mapping directly.
+     */
+    internal fun searchDepthFor(level: Int): SearchDepth {
+        val clamped = level.coerceIn(1, 22)
+        return if (clamped >= 19) {
+            val t = clamped - 19 // 0..3
+            SearchDepth(maxChain = 64 + t * 64, maxCandidates = 32 + t * 32)
+        } else {
+            val t = clamped - 1 // 0..17
+            SearchDepth(
+                maxChain = 8 + (t * (64 - 8)) / 17,
+                maxCandidates = 4 + (t * (32 - 4)) / 17,
+            )
+        }
+    }
+
+    /**
      * Greedy/lazy LZ over `data`, referencing the dictionary content as history.
      * Positions are expressed against the virtual `[dictContent ++ data]` array:
      * a match at distance `d` from input position `i` copies bytes that may lie
      * in the dict content (when `d > i`) or earlier in `data`.
      */
-    private fun buildSequences(data: ByteArray, dict: ParsedDictionary, index: MatchIndex): Program {
+    private fun buildSequences(
+        data: ByteArray,
+        dict: ParsedDictionary,
+        index: MatchIndex,
+        depth: SearchDepth,
+    ): Program {
         val dictContent = dict.content
         val dictLen = dictContent.size
         val n = data.size
@@ -195,7 +237,6 @@ internal object PureZstdEncoder {
 
         // Find the best match for input position `i`. Searches the input chain
         // and the dict index; returns (length, distance) or null.
-        val maxChain = 64
         fun findMatch(i: Int): Long? {
             // The 4-byte hash + prefix check needs 4 bytes available at `i`.
             if (i + 4 > n) return null
@@ -207,7 +248,7 @@ internal object PureZstdEncoder {
             // 1) Input chain (recent `data` positions with the same 4-byte hash).
             var p = head[hashAt(cur)]
             var chain = 0
-            while (p >= 0 && chain < maxChain) {
+            while (p >= 0 && chain < depth.maxChain) {
                 val candHist = dictLen + p
                 val l = matchLength(candHist, cur, available)
                 if (l > bestLen) {
@@ -221,7 +262,7 @@ internal object PureZstdEncoder {
             // 2) Dictionary chain (positions inside the dict content sharing the
             // 4-byte prefix at `cur`). Distances here are large (cur - dictPos).
             val key = first4(::histByte, cur)
-            index.forEachCandidate(key) { dictPos ->
+            index.forEachCandidate(key, depth.maxCandidates) { dictPos ->
                 val l = matchLength(dictPos, cur, available)
                 if (l > bestLen) {
                     bestLen = l
