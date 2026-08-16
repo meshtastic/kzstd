@@ -35,8 +35,19 @@ internal object PureZstdDecoder {
     /**
      * Decode a full zstd [frame] (magic-prefixed) using the parsed [dict],
      * rejecting output larger than [maxSize].
+     *
+     * [onSequenceOffset], when non-null, is invoked with each sequence's raw
+     * `offsetValue` as it's decoded (test-only instrumentation -- e.g. to
+     * verify an encoder actually emits repeat-offset codes, `offsetValue` in
+     * `1..3`, for a given input). Every production call site leaves it null,
+     * so this adds no behavior change to normal decoding.
      */
-    fun decode(frame: ByteArray, dict: ParsedDictionary, maxSize: Int): ByteArray {
+    fun decode(
+        frame: ByteArray,
+        dict: ParsedDictionary,
+        maxSize: Int,
+        onSequenceOffset: ((Int) -> Unit)? = null,
+    ): ByteArray {
         val reader = ForwardByteReader(frame, 0, frame.size)
 
         val magic = reader.readLEInt(4)
@@ -77,7 +88,7 @@ internal object PureZstdDecoder {
                 }
 
                 2 -> { // Compressed_Block.
-                    decodeCompressedBlock(reader, blockSize, out, state, maxSize)
+                    decodeCompressedBlock(reader, blockSize, out, state, maxSize, onSequenceOffset)
                 }
 
                 else -> throw ZstdException("reserved block type $blockType")
@@ -136,6 +147,7 @@ internal object PureZstdDecoder {
         out: OutputBuffer,
         state: DecodeState,
         maxSize: Int,
+        onSequenceOffset: ((Int) -> Unit)? = null,
     ) {
         val blockStart = reader.pos
         val blockEnd = blockStart + blockSize
@@ -143,7 +155,7 @@ internal object PureZstdDecoder {
         val literals = decodeLiteralsSection(reader, blockEnd, state, maxSize)
 
         // Sequences section occupies the rest of the block.
-        decodeSequences(reader, blockEnd, literals, out, state)
+        decodeSequences(reader, blockEnd, literals, out, state, onSequenceOffset)
     }
 
     // ── Literals section (RFC 8878 §3.1.1.3.1) ─────────────────────────────────
@@ -331,6 +343,7 @@ internal object PureZstdDecoder {
         literals: ByteArray,
         out: OutputBuffer,
         state: DecodeState,
+        onSequenceOffset: ((Int) -> Unit)? = null,
     ) {
         // Number_of_Sequences: 0, 1, or 2-3 byte varint-ish encoding.
         var nbSeq = reader.readByte()
@@ -413,6 +426,7 @@ internal object PureZstdDecoder {
                 throw ZstdException("sequence literal length $literalLength overruns literals")
             }
 
+            onSequenceOffset?.invoke(offsetValue)
             val actualOffset = applyOffset(offsetValue, literalLength, state.repeatOffsets)
 
             // Emit: copy `literalLength` literals, then a `matchLength` match.
@@ -474,7 +488,7 @@ internal object PureZstdDecoder {
      * (value - 3) that shift the slots. Returns the actual back-reference
      * distance and mutates [rep].
      */
-    private fun applyOffset(offsetValue: Int, literalLength: Int, rep: IntArray): Int {
+    internal fun applyOffset(offsetValue: Int, literalLength: Int, rep: IntArray): Int {
         if (offsetValue > 3) {
             val actual = offsetValue - 3
             rep[2] = rep[1]

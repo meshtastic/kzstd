@@ -75,7 +75,7 @@ internal object PureZstdEncoder {
 
         // Encode the single block. If it does not beat raw, fall back to a Raw
         // block (still a valid frame).
-        val compressedBlock = encodeCompressedBlock(program, data)
+        val compressedBlock = encodeCompressedBlock(program, data, dict)
         val out = ArrayList<Byte>(data.size + 16)
         FRAME_MAGIC.forEach { out.add(it) }
         out.add(frameHeaderDescriptor())
@@ -293,7 +293,7 @@ internal object PureZstdEncoder {
      * FSE-coded sequences section. Returns null only if it could not be built
      * (it always can for our inputs).
      */
-    private fun encodeCompressedBlock(program: Program, data: ByteArray): ByteArray? {
+    private fun encodeCompressedBlock(program: Program, data: ByteArray, dict: ParsedDictionary): ByteArray? {
         val out = ArrayList<Byte>(data.size + 16)
 
         // Literals_Section_Header (Raw, litType 0). Regenerated_Size = literals
@@ -302,7 +302,7 @@ internal object PureZstdEncoder {
         program.literals.forEach { out.add(it) }
 
         // Sequences_Section.
-        writeSequences(out, program.sequences)
+        writeSequences(out, program.sequences, dict.repeatOffsets)
 
         return ByteArray(out.size) { out[it] }
     }
@@ -335,7 +335,7 @@ internal object PureZstdEncoder {
         }
     }
 
-    private fun writeSequences(out: ArrayList<Byte>, sequences: List<Seq>) {
+    private fun writeSequences(out: ArrayList<Byte>, sequences: List<Seq>, initialRep: IntArray) {
         val nbSeq = sequences.size
         // Number_of_Sequences.
         when {
@@ -366,8 +366,13 @@ internal object PureZstdEncoder {
         val ofTable = predefinedOffsetEnc
         val mlTable = predefinedMatchLengthEnc
 
-        // Translate each Seq into (code, extraValue) triples.
-        val codes = Array(nbSeq) { computeCodes(sequences[it]) }
+        // Translate each Seq into (code, extraValue) triples. Threads the
+        // repeat-offset state forward across sequences in original (chronological)
+        // order -- Array(size) { init } is guaranteed to invoke init for indices
+        // 0 until size in order, so this single pass matches how
+        // ZstdDecoder.applyOffset rotates `rep` per sequence on decode.
+        val rep = initialRep.copyOf()
+        val codes = Array(nbSeq) { computeCodes(sequences[it], rep) }
 
         val bw = ReverseBitWriter()
 
@@ -423,17 +428,83 @@ internal object PureZstdEncoder {
         bw.writeBits(c.ofExtra, c.ofCode)
     }
 
-    private fun computeCodes(seq: Seq): Codes {
+    private fun computeCodes(seq: Seq, rep: IntArray): Codes {
         val llCode = literalLengthCode(seq.litLen)
         val llExtra = seq.litLen - LL_BASELINE[llCode]
         val mlCode = matchLengthCode(seq.matchLen)
         val mlExtra = seq.matchLen - ML_BASELINE[mlCode]
-        // Explicit literal offset: offsetValue = distance + 3. ofCode = number of
-        // extra bits = highBit(offsetValue); ofExtra = offsetValue - (1<<ofCode).
-        val offsetValue = seq.offset + 3
+        // offsetValue is either a repeat-offset code (1..3, mutating `rep`) or an
+        // explicit literal offset (distance + 3). ofCode = number of extra bits =
+        // highBit(offsetValue); ofExtra = offsetValue - (1<<ofCode).
+        val offsetValue = resolveOffsetCode(seq.offset, seq.litLen, rep)
         val ofCode = highBit(offsetValue)
         val ofExtra = offsetValue - (1 shl ofCode)
         return Codes(llCode, llExtra, mlCode, mlExtra, ofCode, ofExtra)
+    }
+
+    /**
+     * Resolve [distance] (this sequence's match offset) against the 3-slot
+     * repeat-offset cache [rep], returning the `offsetValue` to emit and
+     * mutating [rep] to match exactly what [ZstdDecoder]'s `applyOffset` would
+     * compute for that offsetValue -- so the decoder's rep state stays in sync
+     * with the encoder's across the whole sequence stream.
+     *
+     * Deliberately does NOT emit the `literalLength == 0 && offsetValue == 3`
+     * special case (`actual = rep[0] - 1`): it underflows when `rep[0] == 1` and
+     * is the only repeat-code form that isn't a direct slot read. When
+     * `litLen == 0` and `distance == rep[0]` exactly, there is no cheap code for
+     * that combination (that slot is reserved for the excluded form) and this
+     * falls through to an explicit offset -- correct and safe, only
+     * occasionally suboptimal by a few bits. Do not "fix" this into the
+     * underflow-prone form.
+     */
+    internal fun resolveOffsetCode(distance: Int, litLen: Int, rep: IntArray): Int {
+        val rep0 = rep[0]
+        val rep1 = rep[1]
+        val rep2 = rep[2]
+        if (litLen != 0) {
+            when (distance) {
+                // repCode 0: no rotation.
+                rep0 -> return 1
+
+                // repCode 1: swap rep[0]/rep[1].
+                rep1 -> {
+                    rep[0] = rep1
+                    rep[1] = rep0
+                    return 2
+                }
+
+                // repCode 2: rotate rep2->rep0, rep0->rep1, rep1->rep2.
+                rep2 -> {
+                    rep[0] = rep2
+                    rep[1] = rep0
+                    rep[2] = rep1
+                    return 3
+                }
+            }
+        } else {
+            when (distance) {
+                // repCode 1 (litLen==0 form): same rotation as above.
+                rep1 -> {
+                    rep[0] = rep1
+                    rep[1] = rep0
+                    return 1
+                }
+
+                // repCode 2 (litLen==0 form): same rotation as above.
+                rep2 -> {
+                    rep[0] = rep2
+                    rep[1] = rep0
+                    rep[2] = rep1
+                    return 2
+                }
+            }
+        }
+        // Explicit literal offset: shifts the repeat-offset slots.
+        rep[2] = rep1
+        rep[1] = rep0
+        rep[0] = distance
+        return distance + 3
     }
 
     /** Map a literal length to its FSE code (largest baseline <= length). */
