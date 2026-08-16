@@ -24,11 +24,16 @@ import org.meshtastic.kzstd.internal.PureZstdEncoder
 public object Zstd {
 
     /**
-     * Default value for the `level` argument. NOTE: `level` is currently a NO-OP —
-     * the pure-Kotlin encoder uses a single fixed greedy/lazy strategy and does not
-     * implement zstd's 1..22 levels. The parameter is accepted for call-site
-     * familiarity and forward compatibility; passing a different value does not (yet)
-     * change the output.
+     * Default value for the `level` argument. NOTE: `level` governs ONLY
+     * match-finding effort (how many candidate distances the matcher examines
+     * per position) -- higher values can find longer/cheaper matches at the
+     * cost of more work, and this DOES change compressed output size (though
+     * never correctness: every level produces a valid, decodable frame). It
+     * does not implement zstd's other 21 levels' distinct strategies or
+     * parameters (windowLog, targetLength, etc.) -- the pure-Kotlin encoder
+     * uses a single fixed greedy/lazy strategy at every level -- and it never
+     * gates entropy-table choice (dict-entropy reuse is unconditional
+     * whenever the dictionary's tables are usable, independent of `level`).
      */
     public const val DEFAULT_LEVEL: Int = 19
 

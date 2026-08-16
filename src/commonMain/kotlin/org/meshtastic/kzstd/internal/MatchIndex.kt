@@ -25,11 +25,17 @@ internal class MatchIndex private constructor(
     private val prev: IntArray,
 ) {
 
-    /** Walk up to [MAX_CANDIDATES] recent dict positions whose 4-byte prefix == [key]. */
-    inline fun forEachCandidate(key: Int, action: (dictPos: Int) -> Unit) {
+    /**
+     * Walk up to [maxCandidates] recent dict positions whose 4-byte prefix ==
+     * [key]. [maxCandidates] is a per-call search-depth knob (driven by
+     * `level`, see `ZstdEncoder`) -- NOT part of the index structure itself,
+     * so the same index can be reused across calls at different levels
+     * without rebuilding it.
+     */
+    inline fun forEachCandidate(key: Int, maxCandidates: Int = MAX_CANDIDATES, action: (dictPos: Int) -> Unit) {
         var p = head[hash(key)]
         var n = 0
-        while (p >= 0 && n < MAX_CANDIDATES) {
+        while (p >= 0 && n < maxCandidates) {
             // Confirm the 4-byte prefix actually matches (hash collisions exist).
             if (first4(p) == key) action(p)
             p = prev[p]
@@ -52,8 +58,11 @@ internal class MatchIndex private constructor(
         const val MIN_MATCH = 3
 
         /**
-         * How many positions in a hash bucket to examine per lookup. Bounds the
-         * matcher so a repetitive dictionary can't make compression quadratic.
+         * Default (level-independent) bound on how many positions in a hash
+         * bucket [forEachCandidate] examines per lookup, so a repetitive
+         * dictionary can't make compression quadratic. `ZstdEncoder` normally
+         * passes an explicit, level-derived value instead; this default is
+         * exactly what `level`'s default (19) maps to.
          */
         @PublishedApi
         internal const val MAX_CANDIDATES = 32
