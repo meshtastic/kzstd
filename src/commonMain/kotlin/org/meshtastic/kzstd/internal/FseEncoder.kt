@@ -90,9 +90,19 @@ internal class FseEncTable private constructor(
          * Build the encoding table by first building the decode table (so the two
          * are guaranteed consistent) and then indexing decode-states by symbol.
          */
-        fun build(normalizedCounts: IntArray, maxSymbol: Int, tableLog: Int): FseEncTable {
-            val decode = FseTable.build(normalizedCounts, maxSymbol, tableLog)
-            val tableSize = 1 shl tableLog
+        fun build(normalizedCounts: IntArray, maxSymbol: Int, tableLog: Int): FseEncTable =
+            fromDecodeTable(FseTable.build(normalizedCounts, maxSymbol, tableLog), maxSymbol)
+
+        /**
+         * Derive an encoding table directly from an already-built decode [FseTable]
+         * — e.g. one parsed from a trained [ParsedDictionary]'s stored entropy
+         * tables — without re-deriving it from a normalized-count distribution.
+         * [FseTable.build] already guarantees the decode table is self-consistent
+         * (per RFC 8878's normalized-distribution table build), so indexing its
+         * decode-states by symbol here is the entire job.
+         */
+        fun fromDecodeTable(decode: FseTable, maxSymbol: Int): FseEncTable {
+            val tableSize = decode.size
 
             // Group decode-state indices by the symbol they emit. RLE tables
             // (tableLog 0, tableSize 1) collapse to a single state.
@@ -106,7 +116,7 @@ internal class FseEncTable private constructor(
             }
 
             return FseEncTable(
-                tableLog = tableLog,
+                tableLog = decode.tableLog,
                 tableSize = tableSize,
                 symbolStates = symbolStates,
                 nbBits = decode.nbBits,
