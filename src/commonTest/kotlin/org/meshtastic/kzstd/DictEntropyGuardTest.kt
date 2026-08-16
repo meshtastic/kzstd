@@ -12,9 +12,13 @@ import kotlin.test.assertTrue
  * 0xEC30A437), `ParsedDictionary.parse` would treat it as raw content (null
  * Huffman + null FSE tables), and the dict-entropy decode branches (treeless
  * literals, FSE-repeat, repeat-offset seeding) would never run — while every
- * other test stayed green. This fails loudly in that case. The branches are
- * actually *executed* by the libzstd-with-trained-dict → kzstd direction of
- * `KzstdLibzstdInteropTest` (jvm), since kzstd's own encoder never emits them.
+ * other test stayed green. This fails loudly in that case. Repeat-offset
+ * seeding and FSE-repeat (sequences) are now also exercised directly by
+ * kzstd's own encoder (see `RepeatOffsetCodeTest`'s and
+ * `SequenceRepeatModeTest`'s adoption guards); only treeless (dict-Huffman)
+ * literals still require the libzstd-with-trained-dict → kzstd direction of
+ * `KzstdLibzstdInteropTest` (jvm) to exercise, since kzstd's own encoder
+ * doesn't emit those yet.
  */
 class DictEntropyGuardTest {
 

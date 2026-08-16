@@ -151,9 +151,12 @@ internal object TestVectors {
     /**
      * A real libzstd frame compressed WITH [trainedDict] using TREELESS literals
      * (litType 3 — it reuses the dictionary's Huffman table), captured from zstd-jni.
-     * kzstd's own encoder never emits treeless / FSE-repeat frames, so decoding THIS
-     * (in DictEntropyDecodeTest) is what drives kzstd's dictionary-entropy decode path
-     * on EVERY target — including the Huffman weight-decode the one extraction fix touched.
+     * kzstd's own encoder does not emit treeless (dict-Huffman) literals yet, so
+     * decoding THIS (in DictEntropyDecodeTest) is what drives that specific
+     * dictionary-entropy decode path on EVERY target — including the Huffman
+     * weight-decode the one extraction fix touched. (FSE-repeat for sequences and
+     * repeat-offset codes ARE now emitted by kzstd's own encoder — see
+     * SequenceRepeatModeTest / RepeatOffsetCodeTest's adoption guards.)
      */
     val treelessDictFrame: ByteArray = hexToBytes(
         "28b52ffd230d92503b9435010063010399c65a69e84756accc8c4a8508fc8f87036d206e18b8ca544a6861d98e86a8f857ef0d",

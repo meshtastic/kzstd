@@ -28,11 +28,18 @@ import org.meshtastic.kzstd.ZstdException
  *    reused across calls. Lazy (1-step lookahead) matching for a better ratio.
  *  - **Literals:** RAW literals block (litType 0) — simplest valid option and a
  *    good fit because a trained dict turns most bytes into matches.
- *  - **Sequences:** FSE-coded with the PREDEFINED LL/ML/OF tables (mode 0) — no
- *    custom-table emission, and the predefined tables are exactly what
+ *  - **Sequences:** FSE-coded, independently per LL/OF/ML stream. Each stream
+ *    reuses the dictionary's trained "Repeat" table (mode 3) when the dict
+ *    has one and it assigns nonzero probability to every code this block's
+ *    sequences actually need; otherwise it falls back to the PREDEFINED table
+ *    (mode 0) — always total over its symbol range, and exactly what
  *    [PureZstdDecoder] / libzstd build from the spec's default distributions.
- *  - **Offsets:** emitted as explicit literal offsets (`offset_code = distance +
- *    3`), avoiding repeat-offset bookkeeping. Valid and only marginally larger.
+ *    This encoder never emits RLE or a fresh FSE_Compressed table for
+ *    sequences.
+ *  - **Offsets:** a repeat-offset code (1..3) when the match distance equals
+ *    one of the three most-recently-used offsets (rotated exactly as
+ *    [PureZstdDecoder]'s `applyOffset` does), else an explicit literal offset
+ *    (`offset_code = distance + 3`).
  *
  * Pure common Kotlin: no `java.*`, no `expect/actual`.
  */
@@ -302,7 +309,7 @@ internal object PureZstdEncoder {
         program.literals.forEach { out.add(it) }
 
         // Sequences_Section.
-        writeSequences(out, program.sequences, dict.repeatOffsets)
+        writeSequences(out, program.sequences, dict)
 
         return ByteArray(out.size) { out[it] }
     }
@@ -335,7 +342,7 @@ internal object PureZstdEncoder {
         }
     }
 
-    private fun writeSequences(out: ArrayList<Byte>, sequences: List<Seq>, initialRep: IntArray) {
+    private fun writeSequences(out: ArrayList<Byte>, sequences: List<Seq>, dict: ParsedDictionary) {
         val nbSeq = sequences.size
         // Number_of_Sequences.
         when {
@@ -359,20 +366,34 @@ internal object PureZstdEncoder {
             }
         }
 
-        // Symbol_Compression_Modes: predefined (0) for LL, OF, ML; low 2 bits 0.
-        out.add(0)
-
-        val llTable = predefinedLiteralLengthEnc
-        val ofTable = predefinedOffsetEnc
-        val mlTable = predefinedMatchLengthEnc
-
         // Translate each Seq into (code, extraValue) triples. Threads the
         // repeat-offset state forward across sequences in original (chronological)
         // order -- Array(size) { init } is guaranteed to invoke init for indices
         // 0 until size in order, so this single pass matches how
-        // ZstdDecoder.applyOffset rotates `rep` per sequence on decode.
-        val rep = initialRep.copyOf()
+        // ZstdDecoder.applyOffset rotates `rep` per sequence on decode. This
+        // must happen BEFORE picking LL/OF/ML tables below: which table each
+        // stream needs is a function of the codes actually produced.
+        val rep = dict.repeatOffsets.copyOf()
         val codes = Array(nbSeq) { computeCodes(sequences[it], rep) }
+
+        // Symbol_Compression_Modes: 2 bits each for LL, OF, ML (high bits
+        // first), low 2 bits reserved (0). Each stream independently uses the
+        // dictionary's trained "Repeat" table (mode 3) when the dict has one
+        // AND it assigns nonzero probability to every code this block's
+        // sequences actually need -- otherwise Predefined (mode 0), which is
+        // always total over its whole symbol range. This encoder never emits
+        // RLE (1) or a fresh FSE_Compressed table (2) for sequences.
+        val (llTable, llMode) =
+            resolveSequenceTable(dict.literalLengthFse, LITERAL_LENGTH_MAX_SYMBOL, predefinedLiteralLengthEnc, nbSeq) {
+                codes[it].llCode
+            }
+        val (ofTable, ofMode) =
+            resolveSequenceTable(dict.offsetFse, OFFSET_MAX_SYMBOL, predefinedOffsetEnc, nbSeq) { codes[it].ofCode }
+        val (mlTable, mlMode) =
+            resolveSequenceTable(dict.matchLengthFse, MATCH_LENGTH_MAX_SYMBOL, predefinedMatchLengthEnc, nbSeq) {
+                codes[it].mlCode
+            }
+        out.add(((llMode shl 6) or (ofMode shl 4) or (mlMode shl 2)).toByte())
 
         val bw = ReverseBitWriter()
 
@@ -505,6 +526,36 @@ internal object PureZstdEncoder {
         rep[1] = rep0
         rep[0] = distance
         return distance + 3
+    }
+
+    /**
+     * Choose the FSE encode table (and its 2-bit Symbol_Compression_Mode) for
+     * one sequence symbol stream: the dictionary's trained table (Repeat,
+     * mode 3) if [dictTable] is non-null AND covers every code in
+     * `0 until nbSeq` via [codeAt] (checked via [FseEncTable.isCovered] before
+     * committing -- a dict's training corpus commonly never produced some
+     * symbol, leaving it zero-probability), else [predefined] (Predefined,
+     * mode 0), which is always total over its declared symbol range.
+     */
+    private inline fun resolveSequenceTable(
+        dictTable: FseTable?,
+        maxSymbol: Int,
+        predefined: FseEncTable,
+        nbSeq: Int,
+        codeAt: (Int) -> Int,
+    ): Pair<FseEncTable, Int> {
+        if (dictTable != null) {
+            val candidate = FseEncTable.fromDecodeTable(dictTable, maxSymbol)
+            var covered = true
+            for (i in 0 until nbSeq) {
+                if (!candidate.isCovered(codeAt(i))) {
+                    covered = false
+                    break
+                }
+            }
+            if (covered) return candidate to 3
+        }
+        return predefined to 0
     }
 
     /** Map a literal length to its FSE code (largest baseline <= length). */
