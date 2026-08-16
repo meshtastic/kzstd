@@ -27,7 +27,7 @@ Linux (x64, arm64), and Windows (mingw-x64).
 
 ```kotlin
 // Maven Central
-implementation("org.meshtastic:kzstd:0.1.1")
+implementation("org.meshtastic:kzstd:0.1.2")
 ```
 
 ## Usage
@@ -61,10 +61,12 @@ val back = Zstd.decompress(small, dict, maxSize = 64 * 1024)
   interface; each call handles a whole frame from one byte array, with no cross-call
   state, so every frame is independently decodable (what packet and mesh transports
   need).
-- **`level` is currently a no-op.** The encoder uses a single fixed greedy/lazy
-  strategy rather than zstd's 1–22 levels. The `level` parameter is accepted for
-  call-site familiarity and forward compatibility but does not (yet) change the
-  output. Frames remain fully libzstd-compatible.
+- **`level` (1–22) governs match-finding search depth only.** The encoder uses a
+  single fixed greedy/lazy strategy at every level — it does not implement zstd's
+  other per-level parameters (window log, target length, etc.) — but a higher
+  level does search more candidate matches per position, which can shrink output
+  at the cost of more work. Level 19 (`Zstd.DEFAULT_LEVEL`) is unchanged from
+  every earlier release. Frames remain fully libzstd-compatible at every level.
 - **Single block per frame (≤ 128 KiB input).** `Zstd.compress` emits one zstd block,
   so its input is bounded by zstd's 128 KiB `Block_Maximum_Size`; a larger input
   throws `ZstdException`. (`Zstd.decompress` reads multi-block frames from any
@@ -74,9 +76,11 @@ val back = Zstd.decompress(small, dict, maxSize = 64 * 1024)
 
 kzstd reads frames produced by libzstd (including dictionary-compressed frames
 that use the dictionary's Huffman/FSE entropy tables), and libzstd reads frames
-produced by kzstd. The test suite cross-checks both directions against
-[zstd-jni](https://github.com/luben/zstd-jni) (a JVM-test-only oracle, never a
-runtime dependency).
+produced by kzstd — including, now, dictionary-compressed frames kzstd itself
+produces using the dictionary's trained entropy tables and repeat-offset codes,
+when doing so is smaller than the fallback. The test suite cross-checks both
+directions against [zstd-jni](https://github.com/luben/zstd-jni) (a
+JVM-test-only oracle, never a runtime dependency).
 
 ## Building & testing
 
