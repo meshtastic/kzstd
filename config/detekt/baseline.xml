@@ -10,7 +10,7 @@
     <ID>MatchingDeclarationName:ZstdDecoder.kt$PureZstdDecoder</ID>
     <ID>MatchingDeclarationName:ZstdEncoder.kt$PureZstdEncoder</ID>
     <ID>ThrowsCount:Huffman.kt$HuffmanTable.Companion$fun fromWeights(weights: IntArray, numSymbols: Int): HuffmanTable</ID>
-    <ID>ThrowsCount:ZstdDecoder.kt$PureZstdDecoder$private fun decodeSequences( reader: ForwardByteReader, blockEnd: Int, literals: ByteArray, out: OutputBuffer, state: DecodeState, )</ID>
+    <ID>ThrowsCount:ZstdDecoder.kt$PureZstdDecoder$private fun decodeSequences( reader: ForwardByteReader, blockEnd: Int, literals: ByteArray, out: OutputBuffer, state: DecodeState, onSequenceOffset: ((Int) -> Unit)? = null, )</ID>
     <ID>UnusedParameter:ZstdDecoder.kt$PureZstdDecoder$blockEnd: Int</ID>
     <ID>UnusedPrivateProperty:OutputBuffer.kt$OutputBuffer$i</ID>
   </CurrentIssues>
