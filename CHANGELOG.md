@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Encoder-side parity work closing several gaps against the libzstd/RFC 8878
+spec — real ratio improvements for dictionary-compressed frames, no wire
+format or public-API changes.
+
+### Changed
+
+- The encoder now emits repeat-offset sequence codes when a match's distance
+  repeats one of the three most-recently-used offsets, instead of always an
+  explicit literal offset (#48).
+- With a trained dictionary, the encoder now reuses the dictionary's own
+  trained FSE tables for sequences ("Repeat" mode) and its trained Huffman
+  table for literals ("Treeless"), whenever they cover what a given block
+  needs and doing so is smaller than the previous fallback (predefined FSE
+  tables, raw literals) — a real, measurable size reduction for
+  dictionary-compressed frames, not just a wire-format curiosity (#50, #51).
+- `level` (1–22) now governs match-finding search depth: higher levels search
+  more candidate matches per position, which can shrink output at the cost of
+  more work. Level 19 (`Zstd.DEFAULT_LEVEL`) is byte-identical to every
+  earlier release; the encoder still uses one fixed strategy at every level,
+  not zstd's other per-level parameters (#52).
+
+### Notes
+
+- A dictionary-compressed frame's correctness now depends on the dictionary's
+  entropy tables matching what the decoder is seeded with, not just its
+  content — decoding with the wrong dictionary was already silently wrong
+  before this work (kzstd enforces no `Dictionary_ID`), so this doesn't
+  introduce a new failure mode, just makes an existing one marginally more
+  sensitive. Use the same trained dictionary bytes on both ends, as always.
+
 ## [0.1.2]
 
 Dependency and toolchain refresh, plus CI/quality hardening — no codec or public-API changes.
@@ -84,6 +114,7 @@ extracted from [TAKPacket-SDK](https://github.com/meshtastic/TAKPacket-SDK).
 - The `level` parameter is currently a no-op; the encoder uses a single fixed
   greedy/lazy strategy. Frames remain libzstd-compatible regardless.
 
-[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/meshtastic/kzstd/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/meshtastic/kzstd/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/meshtastic/kzstd/releases/tag/v0.1.0
