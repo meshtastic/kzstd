@@ -34,7 +34,7 @@ class FreshSequenceTablesTest {
         // predefined FSE tables and raw literals only. Refresh (never loosen
         // without a reason) if a later, deliberate change moves them.
         val size = Zstd.compress(TestVectors.logRecords).size
-        assertTrue(size < 2093, "log records: $size bytes, pre-entropy-coding baseline was 2093")
+        assertTrue(size < 2007, "log records: $size bytes, pre-entropy-coding baseline was 2007")
     }
 
     /**

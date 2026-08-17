@@ -65,22 +65,31 @@ val back = Zstd.decompress(small, dict, maxSize = 64 * 1024)
   single fixed greedy/lazy strategy at every level — it does not implement zstd's
   other per-level parameters (window log, target length, etc.) — but a higher
   level does search more candidate matches per position, which can shrink output
-  at the cost of more work. Level 19 (`Zstd.DEFAULT_LEVEL`) is unchanged from
-  every earlier release. Frames remain fully libzstd-compatible at every level.
+  at the cost of more work. Frames remain fully libzstd-compatible at every level.
 - **Single block per frame (≤ 128 KiB input).** `Zstd.compress` emits one zstd block,
   so its input is bounded by zstd's 128 KiB `Block_Maximum_Size`; a larger input
   throws `ZstdException`. (`Zstd.decompress` reads multi-block frames from any
   encoder.) Multi-block encoding to lift the cap is planned.
+- **Huffman-coded literals are single-stream and directly described.** The encoder
+  builds a Huffman table from a block's own literals, but writes only the
+  single-stream layout (so it applies to at most 1023 bytes of literals per block)
+  and only the direct 4-bit weight tree description (so a block containing a literal
+  byte above 128 falls back to raw literals). Both limits are encoder-side only —
+  `Zstd.decompress` reads the 4-stream layout and FSE-compressed weight descriptions
+  that libzstd emits.
 
 ## Interoperability
 
 kzstd reads frames produced by libzstd (including dictionary-compressed frames
 that use the dictionary's Huffman/FSE entropy tables), and libzstd reads frames
-produced by kzstd — including, now, dictionary-compressed frames kzstd itself
-produces using the dictionary's trained entropy tables and repeat-offset codes,
-when doing so is smaller than the fallback. The test suite cross-checks both
-directions against [zstd-jni](https://github.com/luben/zstd-jni) (a
-JVM-test-only oracle, never a runtime dependency).
+produced by kzstd — including frames kzstd itself entropy-codes: dictionary
+frames using the dictionary's trained tables and repeat-offset codes, and
+dictionary-free frames using Huffman/FSE tables built from the block's own data
+(or the RLE forms, when a block, its literals or a symbol stream is constant).
+Each of those forms is picked only when it is the smallest valid encoding. The
+test suite cross-checks both directions against
+[zstd-jni](https://github.com/luben/zstd-jni) (a JVM-test-only oracle, never a
+runtime dependency).
 
 ## Building & testing
 
