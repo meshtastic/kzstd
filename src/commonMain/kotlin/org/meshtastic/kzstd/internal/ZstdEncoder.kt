@@ -18,12 +18,13 @@ import org.meshtastic.kzstd.ZstdException
  *  - **Frame header:** single-segment, dictID OFF, contentSize OFF, checksum
  *    OFF — byte-for-byte the descriptor the SDK's decoder (and libzstd) accept,
  *    with a window large enough to cover `dict.content + input`.
- *  - **One block** with Last_Block set, of whichever type is smallest: a
- *    Compressed_Block, an RLE_Block when every input byte is identical, or a
- *    Raw_Block when compression does not pay (a valid fallback; the SDK's own
- *    `0xFF` skip-compress also covers incompressible payloads above this
- *    layer).
- *  - **Matching:** a 4-byte hash-chain matcher over `[dict.content ++ input]`, so
+ *  - **Blocks:** the input is cut into chunks of at most `Block_Maximum_Size`
+ *    (128 KiB), one block each, with Last_Block set on the final one. Each
+ *    block independently takes whichever type is smallest: a Compressed_Block,
+ *    an RLE_Block when every byte of the chunk is identical, or a Raw_Block
+ *    when compression does not pay (a valid fallback; the SDK's own `0xFF`
+ *    skip-compress also covers incompressible payloads above this layer).
+ *  - **Matching:** a 4-byte hash-chain matcher over `[dict.content ++ chunk]`, so
  *    matches can back-reference the dictionary content. The dict index is built
  *    once per `ZstdDictionary` instance, so the dict content is hashed once and
  *    reused across calls. Lazy (1-step lookahead) matching for a better ratio.
@@ -56,10 +57,9 @@ internal object PureZstdEncoder {
     private const val HASH_SIZE = 1 shl HASH_LOG
 
     // zstd's Block_Maximum_Size (RFC 8878 §3.1.1.2): a block's regenerated content
-    // cannot exceed min(windowSize, 128 KiB). This encoder emits ONE block per frame,
-    // so the input is bounded by this. A larger input would silently produce a frame
-    // that neither libzstd nor this decoder accepts, so it is rejected up front
-    // (multi-block encoding to lift the cap is a planned addition).
+    // cannot exceed min(windowSize, 128 KiB), so this is the chunk size the input
+    // is cut into. The window this encoder declares always covers the whole input,
+    // so 128 KiB is the binding half of that minimum.
     private const val MAX_BLOCK_SIZE = 1 shl 17 // 128 KiB
 
     /**
@@ -86,52 +86,35 @@ internal object PureZstdEncoder {
         level: Int = 19,
         checksum: Boolean = false,
     ): ByteArray {
-        if (data.size > MAX_BLOCK_SIZE) {
-            throw ZstdException(
-                "input ${data.size} exceeds the single-block limit of $MAX_BLOCK_SIZE bytes; " +
-                    "kzstd emits one block per frame — multi-block encoding is not yet supported",
-            )
-        }
         val depth = searchDepthFor(level)
-        // Build the literal+sequence program by matching `data` against the
-        // combined [dictContent ++ data] history.
-        val program = buildSequences(data, dict, index, depth)
-
-        // Encode the single block. If it does not beat raw, fall back to a Raw
-        // block (still a valid frame).
-        val compressedBlock = encodeCompressedBlock(program, data, dict)
         val out = ArrayList<Byte>(data.size + 20)
         FRAME_MAGIC.forEach { out.add(it) }
         out.add(frameHeaderDescriptor(checksum))
+        // The window must span the whole frame's back-reference history, not just
+        // one block's: a later block's dictionary match reaches back past every
+        // block before it.
         out.add(windowDescriptor(dict.content.size + data.size))
 
-        // All three block types carry the same 3-byte header, so the smallest
-        // block is simply the one with the smallest payload: 1 byte for RLE
-        // (only when every input byte is identical), `data.size` for Raw, or
-        // the compressed body. Ties go to the simpler form.
-        val constantByte = constantByteOrNull(data)
-        when {
-            constantByte != null &&
-                data.size > 1 &&
-                (compressedBlock == null || compressedBlock.size > 1) -> {
-                // RLE_Block: the single repeated byte IS the block body.
-                writeBlockHeader(out, lastBlock = true, blockType = 1, blockSize = data.size)
-                out.add(constantByte)
-            }
+        // The three repeat-offset slots are per-FRAME state that the decoder
+        // rotates as it executes sequences, so they must be carried from block to
+        // block here too -- restarting them per block would make every repeat code
+        // after the first block mean a different distance. Held in a local: this
+        // singleton keeps no mutable state.
+        val repeatOffsets = dict.repeatOffsets.copyOf()
 
-            compressedBlock != null && compressedBlock.size < data.size -> {
-                // Block_Header (3 bytes LE): last=1, type=2 (Compressed), size=blockSize
-                writeBlockHeader(out, lastBlock = true, blockType = 2, blockSize = compressedBlock.size)
-                compressedBlock.forEach { out.add(it) }
-            }
+        // Cut the input into Block_Maximum_Size chunks, one block each. `do/while`
+        // rather than `while`, so an empty input still emits the one (empty,
+        // Last_Block) block a frame must have.
+        var start = 0
+        do {
+            val end = minOf(start + MAX_BLOCK_SIZE, data.size)
+            encodeBlock(out, data, start, end, lastBlock = end == data.size, dict, index, depth, repeatOffsets)
+            start = end
+        } while (start < data.size)
 
-            else -> {
-                // Raw_Block fallback: the literal bytes are the block.
-                writeBlockHeader(out, lastBlock = true, blockType = 0, blockSize = data.size)
-                data.forEach { out.add(it) }
-            }
-        }
-
+        // RFC 8878 §3.1.1: the checksum is a trailing 4-byte field covering the
+        // FULL frame content, so it goes after every block -- not per block, and
+        // not until the whole multi-block loop above has finished.
         if (checksum) {
             val h = Xxh64.hash(data) and 0xFFFFFFFFL
             out.add((h and 0xFF).toByte())
@@ -141,6 +124,62 @@ internal object PureZstdEncoder {
         }
 
         return ByteArray(out.size) { out[it] }
+    }
+
+    /**
+     * Encode `data[start until end]` as one block appended to [out], choosing the
+     * smallest of the three block types.
+     *
+     * All three carry the same 3-byte header, so the smallest block is simply the
+     * one with the smallest payload: 1 byte for RLE (only when every byte of the
+     * chunk is identical), the chunk length for Raw, or the compressed body. Ties
+     * go to the simpler form.
+     *
+     * [repeatOffsets] is the frame's running repeat-offset state. Sequences move
+     * it, so the block is encoded against a COPY that is adopted only if the
+     * Compressed form actually wins -- a Raw or RLE block carries no sequences and
+     * so leaves the decoder's slots exactly where they were.
+     */
+    @Suppress("LongParameterList")
+    private fun encodeBlock(
+        out: ArrayList<Byte>,
+        data: ByteArray,
+        start: Int,
+        end: Int,
+        lastBlock: Boolean,
+        dict: ParsedDictionary,
+        index: MatchIndex,
+        depth: SearchDepth,
+        repeatOffsets: IntArray,
+    ) {
+        val chunk = data.copyOfRange(start, end)
+        val program = buildSequences(chunk, dict, index, depth, priorBytes = start)
+        val blockOffsets = repeatOffsets.copyOf()
+        val compressedBlock = encodeCompressedBlock(program, chunk, dict, blockOffsets, firstBlock = start == 0)
+
+        val constantByte = constantByteOrNull(chunk)
+        when {
+            constantByte != null &&
+                chunk.size > 1 &&
+                (compressedBlock == null || compressedBlock.size > 1) -> {
+                // RLE_Block: the single repeated byte IS the block body.
+                writeBlockHeader(out, lastBlock, blockType = 1, blockSize = chunk.size)
+                out.add(constantByte)
+            }
+
+            compressedBlock != null && compressedBlock.size < chunk.size -> {
+                // Block_Header (3 bytes LE): last, type=2 (Compressed), size=blockSize
+                writeBlockHeader(out, lastBlock, blockType = 2, blockSize = compressedBlock.size)
+                compressedBlock.forEach { out.add(it) }
+                blockOffsets.copyInto(repeatOffsets)
+            }
+
+            else -> {
+                // Raw_Block fallback: the literal bytes are the block.
+                writeBlockHeader(out, lastBlock, blockType = 0, blockSize = chunk.size)
+                chunk.forEach { out.add(it) }
+            }
+        }
     }
 
     /** The byte every element of [bytes] equals, or null (including when empty). */
@@ -224,16 +263,26 @@ internal object PureZstdEncoder {
     }
 
     /**
-     * Greedy/lazy LZ over `data`, referencing the dictionary content as history.
-     * Positions are expressed against the virtual `[dictContent ++ data]` array:
-     * a match at distance `d` from input position `i` copies bytes that may lie
-     * in the dict content (when `d > i`) or earlier in `data`.
+     * Greedy/lazy LZ over one block's `data` chunk, referencing the dictionary
+     * content as history. Positions are expressed against the virtual
+     * `[dictContent ++ data]` array: a match at distance `d` from input position
+     * `i` copies bytes that may lie in the dict content (when `d > i`) or earlier
+     * in `data`.
+     *
+     * [priorBytes] is how many bytes of the frame precede this chunk. Matches
+     * within the chunk are unaffected by it -- this is deliberately the simple
+     * form, where a block never matches into an earlier block's output -- but the
+     * dictionary does not move with the chunk: in the real frame it sits
+     * [priorBytes] further back, so a dictionary match's distance grows by that
+     * much, and it may no longer run past the dictionary's end (what follows
+     * there is the frame's first block, not this chunk).
      */
     private fun buildSequences(
         data: ByteArray,
         dict: ParsedDictionary,
         index: MatchIndex,
         depth: SearchDepth,
+        priorBytes: Int,
     ): Program {
         val dictContent = dict.content
         val dictLen = dictContent.size
@@ -305,13 +354,20 @@ internal object PureZstdEncoder {
             }
 
             // 2) Dictionary chain (positions inside the dict content sharing the
-            // 4-byte prefix at `cur`). Distances here are large (cur - dictPos).
+            // 4-byte prefix at `cur`). Distances here are large (cur - dictPos),
+            // and grow by `priorBytes` for every block after the first, which is
+            // also why such a match must stop at the dictionary's end.
             val key = first4(::histByte, cur)
             index.forEachCandidate(key, depth.maxCandidates) { dictPos ->
-                val l = matchLength(dictPos, cur, available)
+                // What follows the dictionary's last byte is this chunk only when
+                // the chunk is the frame's first block; after that it is the
+                // frame's earlier output, so the match has to stop at the end of
+                // the dictionary content.
+                val limit = if (priorBytes == 0) available else minOf(available, dictLen - dictPos)
+                val l = matchLength(dictPos, cur, limit)
                 if (l > bestLen) {
                     bestLen = l
-                    bestDist = cur - dictPos
+                    bestDist = cur - dictPos + priorBytes
                 }
             }
 
@@ -390,13 +446,19 @@ internal object PureZstdEncoder {
      * FSE-coded sequences section. Returns null only if it could not be built
      * (it always can for our inputs).
      */
-    private fun encodeCompressedBlock(program: Program, data: ByteArray, dict: ParsedDictionary): ByteArray? {
+    private fun encodeCompressedBlock(
+        program: Program,
+        data: ByteArray,
+        dict: ParsedDictionary,
+        repeatOffsets: IntArray,
+        firstBlock: Boolean,
+    ): ByteArray? {
         val out = ArrayList<Byte>(data.size + 16)
 
-        writeLiteralsSection(out, program.literals, dict)
+        writeLiteralsSection(out, program.literals, dict, firstBlock)
 
         // Sequences_Section.
-        writeSequences(out, program.sequences, dict)
+        writeSequences(out, program.sequences, dict, repeatOffsets, firstBlock)
 
         return ByteArray(out.size) { out[it] }
     }
@@ -415,7 +477,9 @@ internal object PureZstdEncoder {
      *  - **Treeless (litType 3)** -- reuses the dictionary's trained Huffman
      *    table, costing no tree description at all, when the dict has one that
      *    covers every literal byte in this block (a dict's training corpus
-     *    commonly never produced every byte value).
+     *    commonly never produced every byte value). Only offered for the
+     *    frame's FIRST block: after that, "repeat" means the table the previous
+     *    block described, which the dictionary's is not.
      *  - **Huffman_Compressed (litType 2)** -- a table built from THIS block's
      *    own histogram, plus the tree description a decoder needs to rebuild
      *    it. Pays for the description, so it wins only once the literals are
@@ -430,11 +494,16 @@ internal object PureZstdEncoder {
      * above -- which is also what keeps the dictionary's Treeless path from
      * being displaced by an equally-sized fresh table.
      */
-    private fun writeLiteralsSection(out: ArrayList<Byte>, literals: ByteArray, dict: ParsedDictionary) {
+    private fun writeLiteralsSection(
+        out: ArrayList<Byte>,
+        literals: ByteArray,
+        dict: ParsedDictionary,
+        firstBlock: Boolean,
+    ) {
         val rawCost = rawLiteralsHeaderLen(literals.size) + literals.size
         val best = listOfNotNull(
             buildRleLiterals(literals),
-            buildTreelessLiterals(literals, dict),
+            if (firstBlock) buildTreelessLiterals(literals, dict) else null,
             buildHuffmanLiterals(literals),
         ).minByOrNull { it.size }
 
@@ -568,7 +637,19 @@ internal object PureZstdEncoder {
         }
     }
 
-    private fun writeSequences(out: ArrayList<Byte>, sequences: List<Seq>, dict: ParsedDictionary) {
+    /**
+     * Sequences_Section for one block. [repeatOffsets] is the running per-frame
+     * repeat-offset state, advanced in place by the sequences written here --
+     * except when the block carries none, where the decoder likewise never
+     * reaches the sequence machinery.
+     */
+    private fun writeSequences(
+        out: ArrayList<Byte>,
+        sequences: List<Seq>,
+        dict: ParsedDictionary,
+        repeatOffsets: IntArray,
+        firstBlock: Boolean,
+    ) {
         val nbSeq = sequences.size
         // Number_of_Sequences.
         when {
@@ -599,8 +680,7 @@ internal object PureZstdEncoder {
         // ZstdDecoder.applyOffset rotates `rep` per sequence on decode. This
         // must happen BEFORE picking LL/OF/ML tables below: which table each
         // stream needs is a function of the codes actually produced.
-        val rep = dict.repeatOffsets.copyOf()
-        val codes = Array(nbSeq) { computeCodes(sequences[it], rep) }
+        val codes = Array(nbSeq) { computeCodes(sequences[it], repeatOffsets) }
 
         // Symbol_Compression_Modes: 2 bits each for LL, OF, ML (high bits
         // first), low 2 bits reserved (0). Each stream picks its own cheapest
@@ -608,16 +688,25 @@ internal object PureZstdEncoder {
         val llCodes = IntArray(nbSeq) { codes[it].llCode }
         val ofCodes = IntArray(nbSeq) { codes[it].ofCode }
         val mlCodes = IntArray(nbSeq) { codes[it].mlCode }
+        // The dictionary's tables are only what "Repeat" means for the frame's
+        // FIRST block; after that the decoder's repeat slot holds the previous
+        // block's table instead.
         val ll = chooseSequenceTable(
-            dict.literalLengthFse,
+            dict.literalLengthFse.takeIf { firstBlock },
             predefinedLiteralLengthEnc,
             LITERAL_LENGTH_MAX_SYMBOL,
             LITERAL_LENGTH_MAX_LOG,
             llCodes,
         )
-        val of = chooseSequenceTable(dict.offsetFse, predefinedOffsetEnc, OFFSET_MAX_SYMBOL, OFFSET_MAX_LOG, ofCodes)
+        val of = chooseSequenceTable(
+            dict.offsetFse.takeIf { firstBlock },
+            predefinedOffsetEnc,
+            OFFSET_MAX_SYMBOL,
+            OFFSET_MAX_LOG,
+            ofCodes,
+        )
         val ml = chooseSequenceTable(
-            dict.matchLengthFse,
+            dict.matchLengthFse.takeIf { firstBlock },
             predefinedMatchLengthEnc,
             MATCH_LENGTH_MAX_SYMBOL,
             MATCH_LENGTH_MAX_LOG,
@@ -835,9 +924,13 @@ internal object PureZstdEncoder {
         val fresh = buildFreshFseTable(codes, maxSymbol, maxLog)
         if (fresh != null) consider(SeqTableChoice(fresh.encoder, 2, fresh.description))
 
-        // Predefined covers every code these tables can legally carry, so the
-        // fallback is unreachable in practice; it keeps the function total.
-        return best ?: SeqTableChoice(predefined, 0, ByteArray(0))
+        // Predefined covers every code a block of any reachable size produces, so
+        // this is unreachable in practice -- but silently falling back to a table
+        // that cannot represent a code would emit a corrupt stream, so say so
+        // instead. (The one theoretical route is an offset code above the
+        // predefined table's 28: a dictionary match from a block that starts more
+        // than 512 MB into the frame.)
+        return best ?: throw ZstdException("no FSE table can encode this block's sequence codes")
     }
 
     /** Map a literal length to its FSE code (largest baseline <= length). */

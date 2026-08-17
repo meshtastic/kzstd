@@ -26,6 +26,34 @@ internal object FrameInspector {
     /** Block_Size field of the frame's first block header. */
     fun blockSize(frame: ByteArray): Int = blockHeader(frame, frameHeaderEnd(frame)) ushr 3
 
+    /** One block's header fields, as read off the wire. */
+    class Block(val type: Int, val size: Int, val last: Boolean)
+
+    /**
+     * Every block of the frame, in order, by walking the block chain and
+     * skipping each body. The walk asserts the chain ends exactly at the end of
+     * the frame, so a wrong Block_Size or a missing/extra Last_Block flag fails
+     * here rather than surviving as a frame that happens to still decode.
+     *
+     * Note the two meanings of `Block_Size`: for Raw and Compressed blocks it is
+     * the length of the body that follows, but for an RLE block it is the
+     * REGENERATED length while the body is a single byte.
+     */
+    fun blocks(frame: ByteArray): List<Block> {
+        var p = frameHeaderEnd(frame)
+        val blocks = ArrayList<Block>()
+        while (true) {
+            val header = blockHeader(frame, p)
+            val block = Block(type = (header ushr 1) and 0x3, size = header ushr 3, last = (header and 1) == 1)
+            blocks.add(block)
+            p += 3 + if (block.type == 1) 1 else block.size
+            if (block.last) break
+            check(p < frame.size) { "block chain ran off the end of a ${frame.size}-byte frame" }
+        }
+        check(p == frame.size) { "block chain ended at $p of a ${frame.size}-byte frame" }
+        return blocks
+    }
+
     /**
      * Literals_Block_Type (0 Raw, 1 RLE, 2 Huffman_Compressed, 3 Treeless) of
      * the first block, or -1 when that block is not a Compressed_Block.
