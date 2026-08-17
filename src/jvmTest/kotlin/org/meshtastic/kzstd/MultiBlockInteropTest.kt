@@ -77,6 +77,29 @@ class MultiBlockInteropTest {
     }
 
     /**
+     * The companion to the dictionary case below: an RLE BLOCK in the middle of a
+     * frame must leave the entropy state alone just as a Raw one does, so the
+     * block after it can still repeat the table described two blocks back. Both
+     * sides have to agree on that, and only libzstd reading the frame proves it.
+     */
+    @Test
+    fun anRleBlockBetweenCompressedBlocksLeavesTheTablesLive() {
+        val data = telemetry(blockMax) + ByteArray(blockMax) { 'Q'.code.toByte() } + telemetry(blockMax)
+        val frame = Zstd.compress(data)
+
+        val blocks = FrameInspector.blocks(frame)
+        assertEquals(3, blocks.size)
+        assertEquals(1, blocks[1].type, "the constant chunk should be an RLE_Block")
+        assertTrue(
+            FrameInspector.sequenceModesOf(frame, blocks[2])?.toList()?.contains(3) == true,
+            "the block after the RLE block should still repeat a table described before it",
+        )
+
+        assertContentEquals(data, LibZstd.decompress(frame, data.size))
+        assertContentEquals(data, Zstd.decompress(frame, maxSize = data.size))
+    }
+
+    /**
      * A dictionary match's distance is measured from the CURRENT position, so in
      * the second and later blocks the dictionary sits a whole block further back
      * than it does in the first. Here the first block is pure noise, so the
