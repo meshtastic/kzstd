@@ -19,8 +19,14 @@ import org.meshtastic.kzstd.ZstdException
  */
 internal const val FSE_MIN_TABLELOG: Int = 5
 
-/** A freshly built sequence-stream FSE table plus its wire description. */
-internal class FreshFseTable(val encoder: FseEncTable, val description: ByteArray)
+/**
+ * A freshly built sequence-stream FSE table plus its wire description.
+ *
+ * [decoder] is the decode-side table [encoder] was derived from — the same one a
+ * reader rebuilds from [description]. The encoder keeps it so that a later block
+ * choosing "Repeat" mode names exactly the table the decoder is holding.
+ */
+internal class FreshFseTable(val encoder: FseEncTable, val decoder: FseTable, val description: ByteArray)
 
 /**
  * Build an FSE table for [codes] (one sequence stream's symbols, in any order —
@@ -47,6 +53,7 @@ internal fun buildFreshFseTable(codes: IntArray, maxSymbol: Int, maxLog: Int): F
     val decode = FseTable.build(normalized, maxSymbol, tableLog)
     return FreshFseTable(
         FseEncTable.fromDecodeTable(decode, maxSymbol),
+        decode,
         writeFseTableDescription(normalized, maxSymbol, tableLog),
     )
 }

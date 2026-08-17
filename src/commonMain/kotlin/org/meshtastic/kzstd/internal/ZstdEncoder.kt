@@ -29,12 +29,12 @@ import org.meshtastic.kzstd.ZstdException
  *    once per `ZstdDictionary` instance, so the dict content is hashed once and
  *    reused across calls. Lazy (1-step lookahead) matching for a better ratio.
  *  - **Literals:** RLE (litType 1) when every literal is the same byte, the
- *    dictionary's trained Huffman table (Treeless, litType 3, single-stream
+ *    Huffman table the decoder already holds (Treeless, litType 3, single-stream
  *    only) when it covers every literal byte in this block, or RAW (litType 0)
  *    — whichever is smallest.
  *  - **Sequences:** FSE-coded, independently per LL/OF/ML stream, each stream
- *    picking the cheapest of: the dictionary's trained "Repeat" table (mode 3)
- *    when the dict has one that covers this block's codes; RLE (mode 1) when
+ *    picking the cheapest of: the "Repeat" table (mode 3) the decoder already
+ *    holds, when it covers this block's codes; RLE (mode 1) when
  *    every sequence uses the same code; a fresh FSE table built from this
  *    block's own code counts (mode 2); or the PREDEFINED table (mode 0) —
  *    always total over its symbol range, and exactly what [PureZstdDecoder] /
@@ -45,6 +45,10 @@ import org.meshtastic.kzstd.ZstdException
  *    one of the three most-recently-used offsets (rotated exactly as
  *    [PureZstdDecoder]'s `applyOffset` does), else an explicit literal offset
  *    (`offset_code = distance + 3`).
+ *  - **Per-frame state:** the three repeat offsets and the tables the "Repeat"
+ *    modes above name are FRAME state, not block state — seeded from the
+ *    dictionary and then carried block to block, exactly as [PureZstdDecoder]
+ *    carries them (see `FrameEntropy`).
  *
  * Pure common Kotlin: no `java.*`, no `expect/actual`.
  */
@@ -95,12 +99,9 @@ internal object PureZstdEncoder {
         // block before it.
         out.add(windowDescriptor(dict.content.size + data.size))
 
-        // The three repeat-offset slots are per-FRAME state that the decoder
-        // rotates as it executes sequences, so they must be carried from block to
-        // block here too -- restarting them per block would make every repeat code
-        // after the first block mean a different distance. Held in a local: this
-        // singleton keeps no mutable state.
-        val repeatOffsets = dict.repeatOffsets.copyOf()
+        // Per-FRAME entropy state, seeded from the dictionary and carried from
+        // block to block. Held in a local: this singleton keeps no mutable state.
+        val state = FrameEntropy(dict)
 
         // Cut the input into Block_Maximum_Size chunks, one block each. `do/while`
         // rather than `while`, so an empty input still emits the one (empty,
@@ -108,7 +109,7 @@ internal object PureZstdEncoder {
         var start = 0
         do {
             val end = minOf(start + MAX_BLOCK_SIZE, data.size)
-            encodeBlock(out, data, start, end, lastBlock = end == data.size, dict, index, depth, repeatOffsets)
+            encodeBlock(out, data, start, end, lastBlock = end == data.size, dict, index, depth, state)
             start = end
         } while (start < data.size)
 
@@ -135,10 +136,12 @@ internal object PureZstdEncoder {
      * chunk is identical), the chunk length for Raw, or the compressed body. Ties
      * go to the simpler form.
      *
-     * [repeatOffsets] is the frame's running repeat-offset state. Sequences move
-     * it, so the block is encoded against a COPY that is adopted only if the
-     * Compressed form actually wins -- a Raw or RLE block carries no sequences and
-     * so leaves the decoder's slots exactly where they were.
+     * [state] is the frame's running entropy state. Encoding this block moves it
+     * -- sequences rotate the repeat offsets, and any table this block describes
+     * becomes what "Repeat" names next -- so the block is encoded against a COPY
+     * that is adopted only if the Compressed form actually wins. A Raw or RLE
+     * block describes nothing and executes no sequence, so it must leave the
+     * decoder's state exactly where it was.
      */
     @Suppress("LongParameterList")
     private fun encodeBlock(
@@ -150,12 +153,12 @@ internal object PureZstdEncoder {
         dict: ParsedDictionary,
         index: MatchIndex,
         depth: SearchDepth,
-        repeatOffsets: IntArray,
+        state: FrameEntropy,
     ) {
         val chunk = data.copyOfRange(start, end)
         val program = buildSequences(chunk, dict, index, depth, priorBytes = start)
-        val blockOffsets = repeatOffsets.copyOf()
-        val compressedBlock = encodeCompressedBlock(program, chunk, dict, blockOffsets, firstBlock = start == 0)
+        val blockState = state.copy()
+        val compressedBlock = encodeCompressedBlock(program, chunk, blockState)
 
         val constantByte = constantByteOrNull(chunk)
         when {
@@ -171,7 +174,7 @@ internal object PureZstdEncoder {
                 // Block_Header (3 bytes LE): last, type=2 (Compressed), size=blockSize
                 writeBlockHeader(out, lastBlock, blockType = 2, blockSize = compressedBlock.size)
                 compressedBlock.forEach { out.add(it) }
-                blockOffsets.copyInto(repeatOffsets)
+                state.adopt(blockState)
             }
 
             else -> {
@@ -179,6 +182,48 @@ internal object PureZstdEncoder {
                 writeBlockHeader(out, lastBlock, blockType = 0, blockSize = chunk.size)
                 chunk.forEach { out.add(it) }
             }
+        }
+    }
+
+    /**
+     * The state a zstd decoder carries from block to block within one frame: the
+     * three repeat offsets, and the tables that "Repeat" modes name -- the
+     * Huffman table Treeless literals reuse ([huffman]) and the previous block's
+     * FSE table per sequence stream.
+     *
+     * It mirrors [PureZstdDecoder]'s `DecodeState` field for field, and is seeded
+     * the same way, from the dictionary: that is exactly what those modes mean
+     * for a frame's first block. The two must agree at every block boundary or a
+     * Repeat mode names one table on the encode side and another on the decode
+     * side, which no round-trip through this codec alone would reveal.
+     *
+     * Instances live in [encode]'s locals, never on the singleton.
+     */
+    private class FrameEntropy(
+        val repeatOffsets: IntArray,
+        var huffman: HuffmanTable?,
+        var litLenFse: FseTable?,
+        var offsetFse: FseTable?,
+        var matchLenFse: FseTable?,
+    ) {
+        constructor(dict: ParsedDictionary) : this(
+            repeatOffsets = dict.repeatOffsets.copyOf(),
+            huffman = dict.literalsHuffman,
+            litLenFse = dict.literalLengthFse,
+            offsetFse = dict.offsetFse,
+            matchLenFse = dict.matchLengthFse,
+        )
+
+        /** A detached copy to encode one candidate block against. */
+        fun copy(): FrameEntropy = FrameEntropy(repeatOffsets.copyOf(), huffman, litLenFse, offsetFse, matchLenFse)
+
+        /** Take on [other]'s state, once the block encoded against it is emitted. */
+        fun adopt(other: FrameEntropy) {
+            other.repeatOffsets.copyInto(repeatOffsets)
+            huffman = other.huffman
+            litLenFse = other.litLenFse
+            offsetFse = other.offsetFse
+            matchLenFse = other.matchLenFse
         }
     }
 
@@ -446,19 +491,13 @@ internal object PureZstdEncoder {
      * FSE-coded sequences section. Returns null only if it could not be built
      * (it always can for our inputs).
      */
-    private fun encodeCompressedBlock(
-        program: Program,
-        data: ByteArray,
-        dict: ParsedDictionary,
-        repeatOffsets: IntArray,
-        firstBlock: Boolean,
-    ): ByteArray? {
+    private fun encodeCompressedBlock(program: Program, data: ByteArray, state: FrameEntropy): ByteArray? {
         val out = ArrayList<Byte>(data.size + 16)
 
-        writeLiteralsSection(out, program.literals, dict, firstBlock)
+        writeLiteralsSection(out, program.literals, state)
 
         // Sequences_Section.
-        writeSequences(out, program.sequences, dict, repeatOffsets, firstBlock)
+        writeSequences(out, program.sequences, state)
 
         return ByteArray(out.size) { out[it] }
     }
@@ -474,16 +513,16 @@ internal object PureZstdEncoder {
      * Literals_Section_Header + body, in whichever encoding is smallest:
      *
      *  - **RLE (litType 1)** -- one stored byte regenerates the whole run.
-     *  - **Treeless (litType 3)** -- reuses the dictionary's trained Huffman
-     *    table, costing no tree description at all, when the dict has one that
-     *    covers every literal byte in this block (a dict's training corpus
-     *    commonly never produced every byte value). Only offered for the
-     *    frame's FIRST block: after that, "repeat" means the table the previous
-     *    block described, which the dictionary's is not.
+     *  - **Treeless (litType 3)** -- reuses the Huffman table the decoder is
+     *    already holding, costing no tree description at all, when it covers
+     *    every literal byte in this block. That table is the dictionary's for
+     *    the frame's first block, and afterwards whichever table the last
+     *    Huffman-coded block described.
      *  - **Huffman_Compressed (litType 2)** -- a table built from THIS block's
      *    own histogram, plus the tree description a decoder needs to rebuild
      *    it. Pays for the description, so it wins only once the literals are
-     *    both numerous and skewed enough.
+     *    both numerous and skewed enough. Choosing it replaces the table
+     *    Treeless will reuse in later blocks.
      *  - **Raw (litType 0)** -- the fallback, and the winner for short or
      *    high-entropy literal runs.
      *
@@ -493,22 +532,22 @@ internal object PureZstdEncoder {
      * and measured. Ties keep the earlier, simpler candidate in the list order
      * above -- which is also what keeps the dictionary's Treeless path from
      * being displaced by an equally-sized fresh table.
+     *
+     * Updates [state] when the chosen form describes a table, and only then:
+     * Raw and RLE literals describe none, and the decoder likewise keeps
+     * whatever it was holding.
      */
-    private fun writeLiteralsSection(
-        out: ArrayList<Byte>,
-        literals: ByteArray,
-        dict: ParsedDictionary,
-        firstBlock: Boolean,
-    ) {
+    private fun writeLiteralsSection(out: ArrayList<Byte>, literals: ByteArray, state: FrameEntropy) {
         val rawCost = rawLiteralsHeaderLen(literals.size) + literals.size
         val best = listOfNotNull(
             buildRleLiterals(literals),
-            if (firstBlock) buildTreelessLiterals(literals, dict) else null,
+            buildTreelessLiterals(literals, state.huffman),
             buildHuffmanLiterals(literals),
-        ).minByOrNull { it.size }
+        ).minByOrNull { it.section.size }
 
-        if (best != null && best.size < rawCost) {
-            best.forEach { out.add(it) }
+        if (best != null && best.section.size < rawCost) {
+            best.section.forEach { out.add(it) }
+            if (best.described != null) state.huffman = best.described
             return
         }
         // Literals_Section_Header (Raw, litType 0). Regenerated_Size = literals
@@ -517,29 +556,39 @@ internal object PureZstdEncoder {
         literals.forEach { out.add(it) }
     }
 
+    /**
+     * One candidate Literals_Section: the bytes it would occupy, plus the
+     * Huffman table it DESCRIBES on the wire (null unless it carries a tree
+     * description), which becomes what a later block's Treeless literals reuse.
+     */
+    private class LiteralsCandidate(val section: ByteArray, val described: HuffmanTable?)
+
     /** RLE literals (litType 1): header + the single repeated byte, or null. */
-    private fun buildRleLiterals(literals: ByteArray): ByteArray? {
+    private fun buildRleLiterals(literals: ByteArray): LiteralsCandidate? {
         val constant = constantByteOrNull(literals) ?: return null
         val section = ArrayList<Byte>(4)
         writeRawOrRleLiteralsHeader(section, literals.size, litType = 1)
         section.add(constant)
-        return ByteArray(section.size) { section[it] }
+        return LiteralsCandidate(ByteArray(section.size) { section[it] }, described = null)
     }
 
     /**
-     * Treeless literals (litType 3): the dictionary's own Huffman table, so the
+     * Treeless literals (litType 3): the table the decoder already holds, so the
      * section carries no tree description -- only the header and the stream.
-     * Null when there is no dict table, it does not cover some literal byte, or
+     * Null when there is no such table, it does not cover some literal byte, or
      * the result overflows the single-stream size fields.
      */
-    private fun buildTreelessLiterals(literals: ByteArray, dict: ParsedDictionary): ByteArray? {
-        val huffman = dict.literalsHuffman ?: return null
+    private fun buildTreelessLiterals(literals: ByteArray, huffman: HuffmanTable?): LiteralsCandidate? {
+        if (huffman == null) return null
         if (literals.isEmpty() || literals.size > MAX_SINGLE_STREAM_LITERALS) return null
         val encTable = HuffmanEncTable.fromDecodeTable(huffman)
         for (b in literals) if (!encTable.isCovered(b.toInt() and 0xFF)) return null
         val stream = huffmanLiteralsStream(literals, encTable)
         if (stream.size > MAX_SINGLE_STREAM_LITERALS) return null
-        return literalsSection(litType = 3, regenSize = literals.size, body = stream)
+        return LiteralsCandidate(
+            literalsSection(litType = 3, regenSize = literals.size, body = stream),
+            described = null,
+        )
     }
 
     /**
@@ -549,7 +598,7 @@ internal object PureZstdEncoder {
      * ([buildLiteralsHuffman]) or the result overflows the single-stream size
      * fields.
      */
-    private fun buildHuffmanLiterals(literals: ByteArray): ByteArray? {
+    private fun buildHuffmanLiterals(literals: ByteArray): LiteralsCandidate? {
         if (literals.isEmpty() || literals.size > MAX_SINGLE_STREAM_LITERALS) return null
         val histogram = IntArray(256)
         for (b in literals) histogram[b.toInt() and 0xFF]++
@@ -558,7 +607,10 @@ internal object PureZstdEncoder {
         // Compressed_Size counts the tree description AND the stream.
         val body = table.description + stream
         if (body.size > MAX_SINGLE_STREAM_LITERALS) return null
-        return literalsSection(litType = 2, regenSize = literals.size, body = body)
+        return LiteralsCandidate(
+            literalsSection(litType = 2, regenSize = literals.size, body = body),
+            described = table.decoder,
+        )
     }
 
     /**
@@ -638,18 +690,13 @@ internal object PureZstdEncoder {
     }
 
     /**
-     * Sequences_Section for one block. [repeatOffsets] is the running per-frame
-     * repeat-offset state, advanced in place by the sequences written here --
-     * except when the block carries none, where the decoder likewise never
-     * reaches the sequence machinery.
+     * Sequences_Section for one block, advancing [state]: the sequences written
+     * here rotate its repeat offsets, and each stream's chosen table becomes what
+     * "Repeat" names in the next block. A block with no sequences leaves both
+     * alone, exactly as the decoder does -- it returns before the
+     * Symbol_Compression_Modes byte, which such a block does not even carry.
      */
-    private fun writeSequences(
-        out: ArrayList<Byte>,
-        sequences: List<Seq>,
-        dict: ParsedDictionary,
-        repeatOffsets: IntArray,
-        firstBlock: Boolean,
-    ) {
+    private fun writeSequences(out: ArrayList<Byte>, sequences: List<Seq>, state: FrameEntropy) {
         val nbSeq = sequences.size
         // Number_of_Sequences.
         when {
@@ -680,7 +727,7 @@ internal object PureZstdEncoder {
         // ZstdDecoder.applyOffset rotates `rep` per sequence on decode. This
         // must happen BEFORE picking LL/OF/ML tables below: which table each
         // stream needs is a function of the codes actually produced.
-        val codes = Array(nbSeq) { computeCodes(sequences[it], repeatOffsets) }
+        val codes = Array(nbSeq) { computeCodes(sequences[it], state.repeatOffsets) }
 
         // Symbol_Compression_Modes: 2 bits each for LL, OF, ML (high bits
         // first), low 2 bits reserved (0). Each stream picks its own cheapest
@@ -688,30 +735,36 @@ internal object PureZstdEncoder {
         val llCodes = IntArray(nbSeq) { codes[it].llCode }
         val ofCodes = IntArray(nbSeq) { codes[it].ofCode }
         val mlCodes = IntArray(nbSeq) { codes[it].mlCode }
-        // The dictionary's tables are only what "Repeat" means for the frame's
-        // FIRST block; after that the decoder's repeat slot holds the previous
-        // block's table instead.
         val ll = chooseSequenceTable(
-            dict.literalLengthFse.takeIf { firstBlock },
+            state.litLenFse,
             predefinedLiteralLengthEnc,
+            predefinedLiteralLengthDec,
             LITERAL_LENGTH_MAX_SYMBOL,
             LITERAL_LENGTH_MAX_LOG,
             llCodes,
         )
         val of = chooseSequenceTable(
-            dict.offsetFse.takeIf { firstBlock },
+            state.offsetFse,
             predefinedOffsetEnc,
+            predefinedOffsetDec,
             OFFSET_MAX_SYMBOL,
             OFFSET_MAX_LOG,
             ofCodes,
         )
         val ml = chooseSequenceTable(
-            dict.matchLengthFse.takeIf { firstBlock },
+            state.matchLenFse,
             predefinedMatchLengthEnc,
+            predefinedMatchLengthDec,
             MATCH_LENGTH_MAX_SYMBOL,
             MATCH_LENGTH_MAX_LOG,
             mlCodes,
         )
+        // Whatever each stream settled on is what the NEXT block's Repeat mode
+        // names -- for every mode, including Predefined and RLE (the decoder
+        // stores its resolved table the same way regardless of how it got it).
+        state.litLenFse = ll.next
+        state.offsetFse = of.next
+        state.matchLenFse = ml.next
         val llTable = ll.table
         val ofTable = of.table
         val mlTable = ml.table
@@ -860,19 +913,24 @@ internal object PureZstdEncoder {
 
     /**
      * One stream's chosen FSE encode table, its 2-bit Symbol_Compression_Mode,
-     * and the table description bytes (if any) that must follow the mode byte.
+     * the table description bytes (if any) that must follow the mode byte, and
+     * [next] -- the decode-side table the reader ends up holding for this stream,
+     * which is what the NEXT block's Repeat mode would name.
      */
-    private class SeqTableChoice(val table: FseEncTable, val mode: Int, val description: ByteArray)
+    private class SeqTableChoice(val table: FseEncTable, val mode: Int, val description: ByteArray, val next: FseTable)
 
     /**
      * Choose the cheapest valid table for one sequence symbol stream, costed in
      * BITS ([FseEncTable.streamBitCost] is exact, not an entropy estimate) plus
      * 8 bits per description byte:
      *
-     *  - **Repeat (3)** -- the dictionary's trained table, when it exists and
-     *    assigns nonzero probability to every code this block needs (a dict's
-     *    training corpus commonly never produced some symbol). Costs no
-     *    description bytes.
+     *  - **Repeat (3)** -- [repeatTable], the table the decoder is already
+     *    holding for this stream (the dictionary's trained one in the frame's
+     *    first block, the previous block's after that), when it assigns nonzero
+     *    probability to every code this block needs. Costs no description bytes,
+     *    which makes it the cheapest option outright whenever it fits -- and it
+     *    fails safe, since [FseEncTable.streamBitCost] returns null for a code
+     *    the table cannot represent.
      *  - **Predefined (0)** -- the spec's default distribution; also free of
      *    description bytes, and total over its declared symbol range.
      *  - **RLE (1)** -- when every sequence uses the SAME code: one description
@@ -887,9 +945,11 @@ internal object PureZstdEncoder {
      * cheaper to win, so ties keep the mode that costs no description bytes and
      * leaves the dictionary paths in place.
      */
+    @Suppress("LongParameterList")
     private fun chooseSequenceTable(
-        dictTable: FseTable?,
+        repeatTable: FseTable?,
         predefined: FseEncTable,
+        predefinedDecode: FseTable,
         maxSymbol: Int,
         maxLog: Int,
         codes: IntArray,
@@ -906,23 +966,27 @@ internal object PureZstdEncoder {
             }
         }
 
-        if (dictTable != null) {
-            consider(SeqTableChoice(FseEncTable.fromDecodeTable(dictTable, maxSymbol), 3, ByteArray(0)))
+        if (repeatTable != null) {
+            consider(
+                SeqTableChoice(FseEncTable.fromDecodeTable(repeatTable, maxSymbol), 3, ByteArray(0), repeatTable),
+            )
         }
-        consider(SeqTableChoice(predefined, 0, ByteArray(0)))
+        consider(SeqTableChoice(predefined, 0, ByteArray(0), predefinedDecode))
         val constantCode = codes[0].takeIf { first -> codes.all { it == first } }
         if (constantCode != null) {
+            val rle = FseTable.rle(constantCode)
             consider(
                 SeqTableChoice(
-                    FseEncTable.fromDecodeTable(FseTable.rle(constantCode), maxSymbol),
+                    FseEncTable.fromDecodeTable(rle, maxSymbol),
                     1,
                     byteArrayOf(constantCode.toByte()),
+                    rle,
                 ),
             )
         }
 
         val fresh = buildFreshFseTable(codes, maxSymbol, maxLog)
-        if (fresh != null) consider(SeqTableChoice(fresh.encoder, 2, fresh.description))
+        if (fresh != null) consider(SeqTableChoice(fresh.encoder, 2, fresh.description, fresh.decoder))
 
         // Predefined covers every code a block of any reachable size produces, so
         // this is unreachable in practice -- but silently falling back to a table
@@ -970,4 +1034,12 @@ internal object PureZstdEncoder {
     private val predefinedOffsetEnc: FseEncTable by lazy {
         FseEncTable.build(OF_DEFAULT_DISTRIBUTION, OF_DEFAULT_DISTRIBUTION.size - 1, OF_DEFAULT_LOG)
     }
+
+    // The decode-side halves of the same three tables. A block that picks
+    // Predefined leaves the decoder holding THIS table for the stream, so it is
+    // also what a following block's Repeat mode would name -- the encoder has to
+    // be able to hand it back. Same immutable + `by lazy` rule as above.
+    private val predefinedLiteralLengthDec: FseTable by lazy { predefinedLiteralLengthTable() }
+    private val predefinedMatchLengthDec: FseTable by lazy { predefinedMatchLengthTable() }
+    private val predefinedOffsetDec: FseTable by lazy { predefinedOffsetTable() }
 }

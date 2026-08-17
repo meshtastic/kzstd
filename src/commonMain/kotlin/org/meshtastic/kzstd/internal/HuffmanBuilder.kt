@@ -33,8 +33,14 @@ internal const val MAX_LITERAL_CODE_BITS: Int = 11
  */
 private const val MAX_DIRECT_WEIGHTS = 128
 
-/** A freshly built literals Huffman table plus its wire description. */
-internal class FreshHuffmanTable(val encoder: HuffmanEncTable, val description: ByteArray)
+/**
+ * A freshly built literals Huffman table plus its wire description.
+ *
+ * [decoder] is the decode-side table [encoder] was derived from — the same one a
+ * reader rebuilds from [description]. The encoder keeps it so that a later
+ * block's Treeless literals name exactly the table the decoder is holding.
+ */
+internal class FreshHuffmanTable(val encoder: HuffmanEncTable, val decoder: HuffmanTable, val description: ByteArray)
 
 /**
  * Build a Huffman table for the alphabet [histogram] describes (counts per byte
@@ -65,7 +71,7 @@ internal fun buildLiteralsHuffman(histogram: IntArray): FreshHuffmanTable? {
     // fromWeights recomputes.
     val explicit = IntArray(lastSymbol) { weights[it] }
     val decode = HuffmanTable.fromWeights(explicit, lastSymbol)
-    return FreshHuffmanTable(HuffmanEncTable.fromDecodeTable(decode), writeDirectWeights(explicit))
+    return FreshHuffmanTable(HuffmanEncTable.fromDecodeTable(decode), decode, writeDirectWeights(explicit))
 }
 
 /**

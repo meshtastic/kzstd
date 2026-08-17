@@ -32,6 +32,13 @@ class MultiBlockInteropTest {
         assertEquals(1, blocks.count { it.last }, "exactly one Last_Block")
         assertTrue(blocks.last().last, "Last_Block must be the final block")
 
+        // Later blocks reuse tables described by earlier ones, which only libzstd
+        // reading the frame can confirm the encoder and decoder agree about.
+        val repeated = blocks.drop(1).count { block ->
+            FrameInspector.sequenceModesOf(frame, block)?.toList()?.contains(3) == true
+        }
+        assertTrue(repeated > 0, "no later block repeated an earlier block's table")
+
         assertContentEquals(data, LibZstd.decompress(frame, data.size), "kzstd -> libzstd, ${data.size} bytes")
         assertContentEquals(data, Zstd.decompress(frame, maxSize = data.size), "kzstd -> kzstd, ${data.size} bytes")
     }
@@ -74,6 +81,11 @@ class MultiBlockInteropTest {
      * the second and later blocks the dictionary sits a whole block further back
      * than it does in the first. Here the first block is pure noise, so the
      * second block's only compressible history is the dictionary itself.
+     *
+     * It also pins the rule that a Raw block leaves the frame's entropy state
+     * untouched: the noise block describes nothing, so Treeless literals in the
+     * second block still name the DICTIONARY's Huffman table — and libzstd has to
+     * resolve it the same way for the frame to come back intact.
      */
     @Test
     fun multiBlockDictionaryFrameDecodesUnderLibzstd() {
@@ -86,7 +98,13 @@ class MultiBlockInteropTest {
             val frame = Zstd.compress(data, kdict)
             val blocks = FrameInspector.blocks(frame)
             assertEquals(2, blocks.size, "expected two blocks for ${data.size} bytes")
+            assertEquals(0, blocks[0].type, "the noise block should be Raw, describing nothing")
             assertEquals(2, blocks[1].type, "the tail block should be a Compressed_Block")
+            assertEquals(
+                3,
+                FrameInspector.literalsTypeOf(frame, blocks[1]),
+                "the tail block should still reach the dictionary's Huffman table (Treeless)",
+            )
             // Well under half: the tail is a sample the dictionary was trained on,
             // so it only shrinks this far if the second block really is matching
             // into the dictionary. Entropy-coding the literals alone would not.

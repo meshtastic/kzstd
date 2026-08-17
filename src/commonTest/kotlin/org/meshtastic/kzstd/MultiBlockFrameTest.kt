@@ -66,6 +66,29 @@ class MultiBlockFrameTest {
         assertEquals(listOf(false, false, false, true), blocks.map { it.last })
     }
 
+    /**
+     * A block's entropy tables stay live for the blocks after it: "Repeat"
+     * (Symbol_Compression_Mode 3) means the previous block's table, and costs no
+     * description bytes at all. The first block of a dictionary-less frame has no
+     * previous table, so it cannot use the mode — which is what makes the
+     * contrast worth asserting rather than just the presence of a 3 somewhere.
+     */
+    @Test
+    fun laterBlocksRepeatTheEarlierBlocksSequenceTables() {
+        val frame = Zstd.compress(cyclic(blockMax * 3 + 7))
+        val blocks = FrameInspector.blocks(frame)
+
+        val first = FrameInspector.sequenceModesOf(frame, blocks[0])
+        assertEquals(Triple(0, 0, 0), first, "no dictionary, so the first block has nothing to repeat")
+        for (i in 1..2) {
+            assertEquals(
+                Triple(3, 3, 3),
+                FrameInspector.sequenceModesOf(frame, blocks[i]),
+                "block $i should repeat the tables already described",
+            )
+        }
+    }
+
     @Test
     fun multiBlockFramesRoundTrip() {
         // Each shape drives a different block type across the chain: compressible

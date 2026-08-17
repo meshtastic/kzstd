@@ -26,8 +26,8 @@ internal object FrameInspector {
     /** Block_Size field of the frame's first block header. */
     fun blockSize(frame: ByteArray): Int = blockHeader(frame, frameHeaderEnd(frame)) ushr 3
 
-    /** One block's header fields, as read off the wire. */
-    class Block(val type: Int, val size: Int, val last: Boolean)
+    /** One block's header fields, as read off the wire, plus where its body starts. */
+    class Block(val type: Int, val size: Int, val last: Boolean, val bodyStart: Int)
 
     /**
      * Every block of the frame, in order, by walking the block chain and
@@ -44,14 +44,33 @@ internal object FrameInspector {
         val blocks = ArrayList<Block>()
         while (true) {
             val header = blockHeader(frame, p)
-            val block = Block(type = (header ushr 1) and 0x3, size = header ushr 3, last = (header and 1) == 1)
+            val block = Block(
+                type = (header ushr 1) and 0x3,
+                size = header ushr 3,
+                last = (header and 1) == 1,
+                bodyStart = p + 3,
+            )
             blocks.add(block)
-            p += 3 + if (block.type == 1) 1 else block.size
+            p = block.bodyStart + if (block.type == 1) 1 else block.size
             if (block.last) break
             check(p < frame.size) { "block chain ran off the end of a ${frame.size}-byte frame" }
         }
         check(p == frame.size) { "block chain ended at $p of a ${frame.size}-byte frame" }
         return blocks
+    }
+
+    /** [literalsType] for any [block] of the frame, not just the first. */
+    fun literalsTypeOf(frame: ByteArray, block: Block): Int =
+        if (block.type != 2) -1 else frame[block.bodyStart].toInt() and 0x3
+
+    /** [sequenceModes] for any [block] of the frame, not just the first. */
+    fun sequenceModesOf(frame: ByteArray, block: Block): Triple<Int, Int, Int>? {
+        check(block.type == 2) { "not a Compressed_Block" }
+        var p = skipLiteralsSection(frame, block.bodyStart)
+        if (sequenceCountAt(frame, p) == 0) return null
+        p += sequenceCountFieldLen(frame, p)
+        val modes = frame[p].toInt() and 0xFF
+        return Triple((modes ushr 6) and 0x3, (modes ushr 4) and 0x3, (modes ushr 2) and 0x3)
     }
 
     /**
