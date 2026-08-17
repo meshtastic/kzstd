@@ -20,6 +20,13 @@ package org.meshtastic.kzstd.internal
  * three sequence FSE tables using the dict's corresponding table. The frame's
  * three repeat-offset slots are also seeded from the dictionary's stored
  * offsets. All of that lives here so the decoder can reference it.
+ *
+ * [dictionaryId] is the dictionary's own embedded Dictionary_ID (RFC 8878 §5),
+ * used to validate against a frame's declared Dictionary_ID (RFC 8878
+ * §3.1.1.3) at decode time. It is `0` for a raw content dictionary (no
+ * trained-dict header, so no embedded ID) — `0` is also RFC 8878's "no
+ * Dictionary_ID" sentinel, so the decoder's mismatch check naturally skips
+ * validation for content dictionaries.
  */
 internal class ParsedDictionary private constructor(
     val literalsHuffman: HuffmanTable?,
@@ -28,6 +35,7 @@ internal class ParsedDictionary private constructor(
     val literalLengthFse: FseTable?,
     val repeatOffsets: IntArray,
     val content: ByteArray,
+    val dictionaryId: Int,
 ) {
     companion object {
         private const val DICT_MAGIC = 0xEC30A437.toInt()
@@ -52,12 +60,15 @@ internal class ParsedDictionary private constructor(
                     literalLengthFse = null,
                     repeatOffsets = DEFAULT_REPEAT_OFFSETS.copyOf(),
                     content = bytes,
+                    dictionaryId = 0,
                 )
             }
 
-            // Skip the 4-byte Magic_Number + 4-byte Dictionary_ID (offset 8): the
-            // SDK selects the dictionary out-of-band via the wire flags byte, so
-            // the frame-embedded Dictionary_ID is not needed here.
+            // 4-byte Magic_Number, then the 4-byte Dictionary_ID (little-endian):
+            // captured so the decoder can validate it against a frame's declared
+            // Dictionary_ID. The SDK still selects the dictionary itself out-of-band
+            // via the wire flags byte -- this is validation, not selection.
+            val dictionaryId = leInt(bytes, 4)
             val reader = ForwardByteReader(bytes, 8, bytes.size)
 
             // Entropy tables, in the dictionary's defined order.
@@ -81,6 +92,7 @@ internal class ParsedDictionary private constructor(
                 literalLengthFse = litLenFse,
                 repeatOffsets = rep,
                 content = content,
+                dictionaryId = dictionaryId,
             )
         }
 

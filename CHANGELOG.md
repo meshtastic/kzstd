@@ -27,6 +27,18 @@ format or public-API changes.
   earlier release; the encoder still uses one fixed strategy at every level,
   not zstd's other per-level parameters (#52).
 
+### Fixed
+
+- The decoder now validates a frame's Dictionary_ID (RFC 8878 §3.1.1.3)
+  against the supplied dictionary's own embedded Dictionary_ID (RFC 8878
+  §5), when both are present. Decoding a real libzstd frame (which sets a
+  real Dictionary_ID by default when compressing with a proper
+  Zstandard-format dictionary) with the wrong `ZstdDictionary` now throws a
+  `ZstdException` that clearly names it as a dictionary-ID mismatch, instead
+  of a confusing generic corruption error. Frames with no declared
+  Dictionary_ID (kzstd's own encoder always emits these) and raw content
+  dictionaries (no embedded ID) are unaffected — fully backward compatible.
+
 ### Notes
 
 - A dictionary-compressed frame's correctness now depends on the dictionary's
