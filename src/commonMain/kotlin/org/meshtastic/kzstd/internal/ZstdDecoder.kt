@@ -53,7 +53,8 @@ internal object PureZstdDecoder {
         val magic = reader.readLEInt(4)
         if (magic != FRAME_MAGIC) throw ZstdException("bad frame magic ${magic.toString(16)}")
 
-        parseFrameHeader(reader) // window/content-size/dict-id/checksum descriptors
+        val frameDictId = parseFrameHeader(reader) // window/content-size/dict-id/checksum descriptors
+        checkDictionaryId(frameDictId, dict.dictionaryId)
 
         // Output buffer prefixed (conceptually) by the dictionary content: a
         // match offset that reaches before the frame start indexes into the
@@ -100,9 +101,30 @@ internal object PureZstdDecoder {
         return out.frameOutput()
     }
 
+    /**
+     * RFC 8878 §3.1.1.3 / §5: a frame that declares a Dictionary_ID must be
+     * decoded with a dictionary carrying that same embedded Dictionary_ID.
+     * `0` on either side means "not specified" (no field / raw content
+     * dictionary) and is never validated, so dictionary-less and
+     * raw-content-dictionary decoding stay exactly as before this check.
+     */
+    private fun checkDictionaryId(frameDictId: Int, dictDictionaryId: Int) {
+        if (frameDictId != 0 && dictDictionaryId != 0 && frameDictId != dictDictionaryId) {
+            throw ZstdException(
+                "dictionary ID mismatch: frame declares Dictionary_ID=$frameDictId " +
+                    "but the supplied dictionary has Dictionary_ID=$dictDictionaryId",
+            )
+        }
+    }
+
     // ── Frame header ─────────────────────────────────────────────────────────
 
-    private fun parseFrameHeader(reader: ForwardByteReader) {
+    /**
+     * Parses the frame header and returns its declared Dictionary_ID, or `0` if
+     * the field is absent (Dictionary_ID_Flag == 0) -- `0` also doubles as RFC
+     * 8878's own "no Dictionary_ID" sentinel, so callers can treat it uniformly.
+     */
+    private fun parseFrameHeader(reader: ForwardByteReader): Int {
         val descriptor = reader.readByte()
         val frameContentSizeFlag = (descriptor ushr 6) and 0x3
         val singleSegment = (descriptor ushr 5) and 0x1
@@ -121,7 +143,7 @@ internal object PureZstdDecoder {
             2 -> 2
             else -> 4
         }
-        if (dictIdBytes > 0) reader.readLEInt(dictIdBytes)
+        val frameDictId = if (dictIdBytes > 0) reader.readLEInt(dictIdBytes) else 0
 
         // Frame_Content_Size field, 0/1/2/4/8 bytes (presence/size depends on
         // the flag and single-segment bit). We don't need the value.
@@ -137,6 +159,8 @@ internal object PureZstdDecoder {
         // block loop's end; our frames set it OFF. Record nothing here.
         @Suppress("UNUSED_EXPRESSION")
         contentChecksum
+
+        return frameDictId
     }
 
     // ── Compressed block ───────────────────────────────────────────────────────

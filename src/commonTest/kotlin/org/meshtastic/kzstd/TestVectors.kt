@@ -120,6 +120,16 @@ internal object TestVectors {
     val trainedDict: ByteArray by lazy { Base64.decode(DICT_B64_CHUNKS.joinToString("")) }
 
     /**
+     * [trainedDict]'s own embedded Dictionary_ID (RFC 8878 §5): the 4 little-endian
+     * bytes right after the trained-dict magic number.
+     */
+    val trainedDictId: Int by lazy {
+        val b = trainedDict
+        (b[4].toInt() and 0xFF) or ((b[5].toInt() and 0xFF) shl 8) or
+            ((b[6].toInt() and 0xFF) shl 16) or ((b[7].toInt() and 0xFF) shl 24)
+    }
+
+    /**
      * Structured records from the dictionary's training distribution. libzstd
      * compresses these WITH the dict (treeless literals / FSE-repeat), so decoding
      * them in kzstd drives the dictionary-entropy path.

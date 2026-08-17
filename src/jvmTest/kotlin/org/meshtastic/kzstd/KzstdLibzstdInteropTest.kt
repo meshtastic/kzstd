@@ -5,6 +5,7 @@ import com.github.luben.zstd.ZstdDictCompress
 import com.github.luben.zstd.ZstdDictDecompress
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import com.github.luben.zstd.Zstd as LibZstd
 
@@ -83,6 +84,60 @@ class KzstdLibzstdInteropTest {
             firstBlockLitType(TestVectors.treelessDictFrame) == 3,
             "the committed treelessDictFrame is not actually treeless",
         )
+    }
+
+    @Test
+    fun libzstdFrameWithRealDictIdDecodesUnderKzstd_correctDict() {
+        // libzstd sets a real (non-zero) Dictionary_ID by default when compressing
+        // with a proper Zstandard-format dictionary (RFC 8878 §5) -- unlike kzstd's
+        // own encoder, which never sets one (Dictionary_ID_Flag=0 always).
+        val cdict = ZstdDictCompress(dictBytes, Zstd.DEFAULT_LEVEL)
+        val frame = LibZstd.compress(TestVectors.structured[0], cdict)
+        assertTrue(frameDictId(frame) != 0, "libzstd did not set a frame Dictionary_ID")
+        val back = Zstd.decompress(frame, kdict, max)
+        assertContentEquals(TestVectors.structured[0], back)
+    }
+
+    @Test
+    fun libzstdFrameWithRealDictIdDecodesUnderKzstd_wrongDictThrowsClearError() {
+        // Same dictionary content/entropy tables, but a different embedded
+        // Dictionary_ID -- simulates "the caller supplied the wrong dictionary".
+        val wrongIdBytes = dictBytes.copyOf()
+        val wrongId = TestVectors.trainedDictId xor 0x5A5A5A5A
+        wrongIdBytes[4] = (wrongId and 0xFF).toByte()
+        wrongIdBytes[5] = ((wrongId ushr 8) and 0xFF).toByte()
+        wrongIdBytes[6] = ((wrongId ushr 16) and 0xFF).toByte()
+        wrongIdBytes[7] = ((wrongId ushr 24) and 0xFF).toByte()
+        val wrongDict = ZstdDictionary(wrongIdBytes)
+
+        val cdict = ZstdDictCompress(dictBytes, Zstd.DEFAULT_LEVEL)
+        val frame = LibZstd.compress(TestVectors.structured[0], cdict)
+        assertTrue(frameDictId(frame) != 0, "libzstd did not set a frame Dictionary_ID")
+
+        val ex = assertFailsWith<ZstdException> { Zstd.decompress(frame, wrongDict, max) }
+        assertTrue(
+            ex.message?.contains("dictionary ID mismatch", ignoreCase = true) == true,
+            "expected a dictionary-ID-mismatch message, got: ${ex.message}",
+        )
+    }
+
+    /** Frame's declared Dictionary_ID (RFC 8878 §3.1.1.3), or 0 if the field is absent. */
+    private fun frameDictId(frame: ByteArray): Int {
+        var p = 4 // skip frame magic
+        val fhd = frame[p].toInt() and 0xFF
+        p++
+        val singleSegment = (fhd ushr 5) and 0x1
+        val dictIdFlag = fhd and 0x3
+        if (singleSegment == 0) p++ // window descriptor
+        val dictIdBytes = when (dictIdFlag) {
+            0 -> 0
+            1 -> 1
+            2 -> 2
+            else -> 4
+        }
+        var id = 0
+        for (i in 0 until dictIdBytes) id = id or ((frame[p + i].toInt() and 0xFF) shl (8 * i))
+        return id
     }
 
     /** Literals_Block_Type of the first block (RFC 8878), or -1 if not a Compressed block. */
