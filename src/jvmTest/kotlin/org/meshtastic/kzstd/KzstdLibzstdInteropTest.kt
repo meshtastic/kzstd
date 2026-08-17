@@ -155,6 +155,18 @@ class KzstdLibzstdInteropTest {
     }
 
     @Test
+    fun kzstdChecksummedFramesDecodeUnderLibzstdAndSelf() {
+        // Opt-in encoder-side checksum emission (checksum = true): the frame
+        // must still be a valid frame libzstd accepts, AND kzstd's own decoder
+        // must validate the checksum it just wrote.
+        for (sample in TestVectors.corpus) {
+            val frame = Zstd.compress(sample, level = Zstd.DEFAULT_LEVEL, checksum = true)
+            assertContentEquals(sample, LibZstd.decompress(frame, max), "kzstd(checksum)->libzstd, size=${sample.size}")
+            assertContentEquals(sample, Zstd.decompress(frame, max), "kzstd(checksum)->kzstd, size=${sample.size}")
+        }
+    }
+
+    @Test
     fun kzstdRejectsCorruptedChecksummedFrame() {
         val sample = TestVectors.corpus.first { it.isNotEmpty() }
         val frame = ZstdCompressCtx().use { it.setChecksum(true).compress(sample) }
