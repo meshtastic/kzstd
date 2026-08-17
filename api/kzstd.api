@@ -1,10 +1,10 @@
 public final class org/meshtastic/kzstd/Zstd {
 	public static final field DEFAULT_LEVEL I
 	public static final field INSTANCE Lorg/meshtastic/kzstd/Zstd;
-	public final fun compress ([BI)[B
-	public final fun compress ([BLorg/meshtastic/kzstd/ZstdDictionary;I)[B
-	public static synthetic fun compress$default (Lorg/meshtastic/kzstd/Zstd;[BIILjava/lang/Object;)[B
-	public static synthetic fun compress$default (Lorg/meshtastic/kzstd/Zstd;[BLorg/meshtastic/kzstd/ZstdDictionary;IILjava/lang/Object;)[B
+	public final fun compress ([BIZ)[B
+	public final fun compress ([BLorg/meshtastic/kzstd/ZstdDictionary;IZ)[B
+	public static synthetic fun compress$default (Lorg/meshtastic/kzstd/Zstd;[BIZILjava/lang/Object;)[B
+	public static synthetic fun compress$default (Lorg/meshtastic/kzstd/Zstd;[BLorg/meshtastic/kzstd/ZstdDictionary;IZILjava/lang/Object;)[B
 	public final fun decompress ([BI)[B
 	public final fun decompress ([BLorg/meshtastic/kzstd/ZstdDictionary;I)[B
 }

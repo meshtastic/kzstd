@@ -23,8 +23,8 @@ final object org.meshtastic.kzstd/Zstd { // org.meshtastic.kzstd/Zstd|null[0]
     final const val DEFAULT_LEVEL // org.meshtastic.kzstd/Zstd.DEFAULT_LEVEL|{}DEFAULT_LEVEL[0]
         final fun <get-DEFAULT_LEVEL>(): kotlin/Int // org.meshtastic.kzstd/Zstd.DEFAULT_LEVEL.<get-DEFAULT_LEVEL>|<get-DEFAULT_LEVEL>(){}[0]
 
-    final fun compress(kotlin/ByteArray, kotlin/Int = ...): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.compress|compress(kotlin.ByteArray;kotlin.Int){}[0]
-    final fun compress(kotlin/ByteArray, org.meshtastic.kzstd/ZstdDictionary, kotlin/Int = ...): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.compress|compress(kotlin.ByteArray;org.meshtastic.kzstd.ZstdDictionary;kotlin.Int){}[0]
+    final fun compress(kotlin/ByteArray, kotlin/Int = ..., kotlin/Boolean = ...): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.compress|compress(kotlin.ByteArray;kotlin.Int;kotlin.Boolean){}[0]
+    final fun compress(kotlin/ByteArray, org.meshtastic.kzstd/ZstdDictionary, kotlin/Int = ..., kotlin/Boolean = ...): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.compress|compress(kotlin.ByteArray;org.meshtastic.kzstd.ZstdDictionary;kotlin.Int;kotlin.Boolean){}[0]
     final fun decompress(kotlin/ByteArray, kotlin/Int): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.decompress|decompress(kotlin.ByteArray;kotlin.Int){}[0]
     final fun decompress(kotlin/ByteArray, org.meshtastic.kzstd/ZstdDictionary, kotlin/Int): kotlin/ByteArray // org.meshtastic.kzstd/Zstd.decompress|decompress(kotlin.ByteArray;org.meshtastic.kzstd.ZstdDictionary;kotlin.Int){}[0]
 }

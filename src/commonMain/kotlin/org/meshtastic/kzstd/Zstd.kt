@@ -37,17 +37,31 @@ public object Zstd {
      */
     public const val DEFAULT_LEVEL: Int = 19
 
-    /** Compress [data] into a standard zstd frame using [dictionary]. */
+    /**
+     * Compress [data] into a standard zstd frame using [dictionary].
+     *
+     * [checksum], when true, sets Content_Checksum_Flag and appends a
+     * trailing 4-byte XXH64 checksum of [data] (RFC 8878 §3.1.1) that
+     * [decompress] (and any conformant decoder) validates. Defaults to false
+     * — existing callers' frame bytes are unchanged.
+     */
     @Throws(ZstdException::class)
-    public fun compress(data: ByteArray, dictionary: ZstdDictionary, level: Int = DEFAULT_LEVEL): ByteArray =
-        wrapFailures("compression", data.size) {
-            PureZstdEncoder.encode(data, dictionary.parsed, dictionary.matchIndex, level)
-        }
+    public fun compress(
+        data: ByteArray,
+        dictionary: ZstdDictionary,
+        level: Int = DEFAULT_LEVEL,
+        checksum: Boolean = false,
+    ): ByteArray = wrapFailures("compression", data.size) {
+        PureZstdEncoder.encode(data, dictionary.parsed, dictionary.matchIndex, level, checksum)
+    }
 
-    /** Compress [data] into a standard zstd frame with no dictionary. */
+    /**
+     * Compress [data] into a standard zstd frame with no dictionary. See
+     * [compress] (dictionary overload) for [checksum].
+     */
     @Throws(ZstdException::class)
-    public fun compress(data: ByteArray, level: Int = DEFAULT_LEVEL): ByteArray =
-        compress(data, ZstdDictionary.EMPTY, level)
+    public fun compress(data: ByteArray, level: Int = DEFAULT_LEVEL, checksum: Boolean = false): ByteArray =
+        compress(data, ZstdDictionary.EMPTY, level, checksum)
 
     /**
      * Decompress a standard zstd [frame] using [dictionary], rejecting output

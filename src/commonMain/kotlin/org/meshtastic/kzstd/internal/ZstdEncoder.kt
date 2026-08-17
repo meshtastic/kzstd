@@ -73,8 +73,19 @@ internal object PureZstdEncoder {
      * distinct strategies/parameters (windowLog, targetLength, etc.); this
      * encoder uses a single fixed greedy/lazy strategy at every level, just
      * with a shallower or deeper search.
+     *
+     * [checksum], when true, sets Content_Checksum_Flag and appends the
+     * trailing 4-byte XXH64(seed=0) low-32-bits checksum of [data] (RFC 8878
+     * §3.1.1). Defaults to false so every existing call site's wire output is
+     * byte-for-byte unchanged (see [ByteIdenticalRegressionTest]).
      */
-    fun encode(data: ByteArray, dict: ParsedDictionary, index: MatchIndex, level: Int = 19): ByteArray {
+    fun encode(
+        data: ByteArray,
+        dict: ParsedDictionary,
+        index: MatchIndex,
+        level: Int = 19,
+        checksum: Boolean = false,
+    ): ByteArray {
         if (data.size > MAX_BLOCK_SIZE) {
             throw ZstdException(
                 "input ${data.size} exceeds the single-block limit of $MAX_BLOCK_SIZE bytes; " +
@@ -89,9 +100,9 @@ internal object PureZstdEncoder {
         // Encode the single block. If it does not beat raw, fall back to a Raw
         // block (still a valid frame).
         val compressedBlock = encodeCompressedBlock(program, data, dict)
-        val out = ArrayList<Byte>(data.size + 16)
+        val out = ArrayList<Byte>(data.size + 20)
         FRAME_MAGIC.forEach { out.add(it) }
-        out.add(frameHeaderDescriptor())
+        out.add(frameHeaderDescriptor(checksum))
         out.add(windowDescriptor(dict.content.size + data.size))
 
         if (compressedBlock != null && compressedBlock.size < data.size) {
@@ -103,6 +114,15 @@ internal object PureZstdEncoder {
             writeBlockHeader(out, lastBlock = true, blockType = 0, blockSize = data.size)
             data.forEach { out.add(it) }
         }
+
+        if (checksum) {
+            val h = Xxh64.hash(data) and 0xFFFFFFFFL
+            out.add((h and 0xFF).toByte())
+            out.add(((h ushr 8) and 0xFF).toByte())
+            out.add(((h ushr 16) and 0xFF).toByte())
+            out.add(((h ushr 24) and 0xFF).toByte())
+        }
+
         return ByteArray(out.size) { out[it] }
     }
 
@@ -110,11 +130,11 @@ internal object PureZstdEncoder {
 
     /**
      * Frame_Header_Descriptor: Frame_Content_Size flag 0, Single_Segment 0,
-     * Content_Checksum 0, Dictionary_ID 0. (Single_Segment 0 means a
+     * Content_Checksum [checksum], Dictionary_ID 0. (Single_Segment 0 means a
      * Window_Descriptor byte follows, which is how the SDK's frames are shaped
      * and what its decoder skips.)
      */
-    private fun frameHeaderDescriptor(): Byte = 0
+    private fun frameHeaderDescriptor(checksum: Boolean): Byte = if (checksum) (1 shl 2).toByte() else 0
 
     /**
      * Window_Descriptor byte. The window must cover the full back-reference

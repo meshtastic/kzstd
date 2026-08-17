@@ -8,7 +8,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Encoder-side parity work closing several gaps against the libzstd/RFC 8878
 spec — real ratio improvements for dictionary-compressed frames, no wire
-format or public-API changes.
+format or public-API changes (except where noted below, for the
+Content_Checksum fix).
+
+### Fixed
+
+- The decoder now validates a frame's Content_Checksum when
+  `Content_Checksum_Flag` is set: it reads the trailing 4-byte XXH64
+  checksum and throws `ZstdException` on a mismatch against the decoded
+  content, for ANY conformant frame — not just kzstd's own — so a real
+  `libzstd`-produced frame (checksums are on by default in the `zstd` CLI)
+  is no longer accepted with silently-corrupted content.
+
+### Added
+
+- `Zstd.compress` takes an opt-in `checksum: Boolean = false` parameter; when
+  true, the encoder sets `Content_Checksum_Flag` and appends the XXH64
+  checksum of the input. Defaults to false, so every existing call site's
+  frame bytes are unchanged.
 
 ### Changed
 
