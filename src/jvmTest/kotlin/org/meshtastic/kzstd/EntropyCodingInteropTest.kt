@@ -44,6 +44,35 @@ class EntropyCodingInteropTest {
         assertContentEquals(data, LibZstd.decompress(frame, max))
     }
 
+    /**
+     * The whole point of the fresh-Huffman work: a table built from the block's
+     * own histogram, described on the wire, and rebuilt by an independent
+     * decoder. Nothing but a real libzstd decode proves the
+     * Huffman_Tree_Description and the canonical code assignment agree with the
+     * spec rather than merely with kzstd's own reader.
+     */
+    @Test
+    fun freshHuffmanLiteralsDecodeUnderLibzstd() {
+        for (data in huffmanSamples()) {
+            val frame = Zstd.compress(data)
+            assertEquals(2, FrameInspector.literalsType(frame), "expected Huffman literals for ${data.size} bytes")
+            assertContentEquals(data, LibZstd.decompress(frame, max), "size=${data.size}")
+        }
+    }
+
+    private fun huffmanSamples(): List<ByteArray> = listOf(
+        (
+            "the quick brown fox jumps over the lazy dog while nominal reports stream " +
+                "steadily across every monitored link and latency stays within throughput " +
+                "targets even when the region degrades to offline for a while. "
+            ).encodeToByteArray(),
+        TestVectors.structured.reduce { a, b -> a + b },
+        // Wide alphabets: long weight descriptions, and (for the skewed one)
+        // code lengths spread far enough to reach the length limit.
+        TestVectors.skewedAlphabet,
+        TestVectors.wideAlphabet,
+    )
+
     @Test
     fun rleLiteralsDecodeUnderLibzstd() {
         val data = TestVectors.rleLiteralsSample

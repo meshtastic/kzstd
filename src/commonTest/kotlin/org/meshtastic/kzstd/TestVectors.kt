@@ -214,12 +214,44 @@ internal object TestVectors {
             "A" + "reports stream steadily"
         ).encodeToByteArray()
 
+    /**
+     * Skewed draws over ~90 byte values, with essentially no repeated
+     * substrings: nearly every byte stays a literal, so the block's literals
+     * exercise a wide Huffman alphabet whose counts differ by orders of
+     * magnitude (long weight descriptions, and code lengths spread far enough
+     * to reach the length limit).
+     */
+    val skewedAlphabet: ByteArray = mappedPseudoRandom(900) { r ->
+        val x = r % 120
+        x * x / 120
+    }
+
+    /**
+     * Near-uniform draws over 127 byte values — close to the widest alphabet a
+     * direct (non-FSE-compressed) Huffman_Tree_Description can carry, and the
+     * least favourable shape for Huffman coding that still pays for itself.
+     */
+    val wideAlphabet: ByteArray = mappedPseudoRandom(900) { r -> r % 127 }
+
     /** The exact plaintext [treelessDictFrame] must decode to (verified by DictEntropyDecodeTest). */
     val treelessDictPlaintext: ByteArray = hexToBytes(
         "7b2274797065223a22686561727462656174222c22736571223a3634383838362c226e6f6465223a226e6f64652d3233222c227374617465223a226f6b222c226c6174223a2d36382e32303131302c226c6f6e223a2d32352e36383235352c226d7367223a22726567696f6e20616e64206e6f6d696e616c206e6f6d696e616c206d6f6e69746f7265642074686520746865227d",
     )
 
     private fun hexToBytes(s: String): ByteArray = ByteArray(s.length / 2) { ((s[it * 2].digitToInt(16) shl 4) or s[it * 2 + 1].digitToInt(16)).toByte() }
+
+    /**
+     * Deterministic pseudo-random bytes drawn through [toSymbol], which maps a
+     * fresh LCG value to a byte value — the way to build a payload with a
+     * chosen alphabet size and skew that is identical on every target.
+     */
+    private fun mappedPseudoRandom(n: Int, toSymbol: (Int) -> Int): ByteArray {
+        var s = 0x12345678
+        return ByteArray(n) {
+            s = (s * 1103515245 + 12345) and 0x7FFFFFFF
+            toSymbol(s ushr 8).toByte()
+        }
+    }
 
     /** Deterministic pseudo-random bytes (a 32-bit LCG) — incompressible-ish input. */
     private fun pseudoRandom(n: Int): ByteArray {

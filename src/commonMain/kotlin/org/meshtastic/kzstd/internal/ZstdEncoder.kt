@@ -400,95 +400,135 @@ internal object PureZstdEncoder {
         return ByteArray(out.size) { out[it] }
     }
 
-    // Single-stream Treeless Huffman literals (RFC 8878 3.1.1.3.1.1,
-    // size_format 0) cap both Regenerated_Size and Compressed_Size at 10 bits
-    // each. The 4-stream jump-table layout, needed only past ~1 KB of
-    // literals, is out of scope: this codec's real payloads (CoT/TAK protobuf
-    // bytes) are comfortably under this cap, and runs over it fall back to Raw.
-    private const val MAX_TREELESS_LITERALS = 1023
+    // Single-stream Huffman literals (RFC 8878 3.1.1.3.1.1, size_format 0)
+    // cap both Regenerated_Size and Compressed_Size at 10 bits each. The
+    // 4-stream jump-table layout, needed only past ~1 KB of literals, is out of
+    // scope: this codec's real payloads (CoT/TAK protobuf bytes) are
+    // comfortably under this cap, and runs over it fall back to Raw.
+    private const val MAX_SINGLE_STREAM_LITERALS = 1023
 
     /**
-     * Literals_Section_Header + body. Prefers reusing the dictionary's trained
-     * Huffman table (Treeless, litType 3) over Raw (litType 0) when ALL of:
-     * the dict has a table, every literal byte is [HuffmanEncTable.isCovered]
-     * by it (a dict's training corpus commonly never produced every byte
-     * value), the encoded size fits the 10-bit field this encoder supports,
-     * AND the encoded form is actually smaller than Raw -- Treeless can lose
-     * for a payload that doesn't match the dict's trained distribution, so
-     * this comparison is mandatory, not a hint.
+     * Literals_Section_Header + body, in whichever encoding is smallest:
+     *
+     *  - **RLE (litType 1)** -- one stored byte regenerates the whole run.
+     *  - **Treeless (litType 3)** -- reuses the dictionary's trained Huffman
+     *    table, costing no tree description at all, when the dict has one that
+     *    covers every literal byte in this block (a dict's training corpus
+     *    commonly never produced every byte value).
+     *  - **Huffman_Compressed (litType 2)** -- a table built from THIS block's
+     *    own histogram, plus the tree description a decoder needs to rebuild
+     *    it. Pays for the description, so it wins only once the literals are
+     *    both numerous and skewed enough.
+     *  - **Raw (litType 0)** -- the fallback, and the winner for short or
+     *    high-entropy literal runs.
+     *
+     * The comparison is mandatory rather than a hint: an entropy-coded form can
+     * lose outright (Treeless for a payload unlike the dict's training corpus,
+     * Huffman for near-uniform literals), so each candidate is built in full
+     * and measured. Ties keep the earlier, simpler candidate in the list order
+     * above -- which is also what keeps the dictionary's Treeless path from
+     * being displaced by an equally-sized fresh table.
      */
     private fun writeLiteralsSection(out: ArrayList<Byte>, literals: ByteArray, dict: ParsedDictionary) {
         val rawCost = rawLiteralsHeaderLen(literals.size) + literals.size
+        val best = listOfNotNull(
+            buildRleLiterals(literals),
+            buildTreelessLiterals(literals, dict),
+            buildHuffmanLiterals(literals),
+        ).minByOrNull { it.size }
 
-        // RLE literals (litType 1): one stored byte regenerates the whole run.
-        // Reachable whenever every literal is the same byte -- with a dictionary
-        // that happens for real inputs whose only literals are a repeated
-        // separator, every other byte having been matched into the dict.
-        val constant = constantByteOrNull(literals)
-        if (constant != null && rawLiteralsHeaderLen(literals.size) + 1 < rawCost) {
-            writeRawOrRleLiteralsHeader(out, literals.size, litType = 1)
-            out.add(constant)
+        if (best != null && best.size < rawCost) {
+            best.forEach { out.add(it) }
             return
         }
-
-        val huffman = dict.literalsHuffman
-        if (huffman != null && literals.isNotEmpty() && literals.size <= MAX_TREELESS_LITERALS) {
-            val encTable = HuffmanEncTable.fromDecodeTable(huffman)
-            var covered = true
-            for (b in literals) {
-                if (!encTable.isCovered(b.toInt() and 0xFF)) {
-                    covered = false
-                    break
-                }
-            }
-            if (covered) {
-                // Build the actual bitstream (cheap at this size) rather than
-                // estimating its byte length from summed bit-lengths -- the
-                // trailing stop bit (see ReverseBitWriter) can push the real
-                // length one byte past a naive ceil(totalBits/8) estimate.
-                val bw = ReverseBitWriter()
-                for (i in literals.size - 1 downTo 0) {
-                    encTable.encode(bw, literals[i].toInt() and 0xFF)
-                }
-                val stream = bw.finish()
-                if (stream.size <= MAX_TREELESS_LITERALS) {
-                    val rawCost = rawLiteralsHeaderLen(literals.size) + literals.size
-                    val treelessCost = TREELESS_HEADER_LEN + stream.size
-                    if (treelessCost < rawCost) {
-                        writeTreelessHuffmanLiteralsHeader(out, literals.size, stream.size)
-                        stream.forEach { out.add(it) }
-                        return
-                    }
-                }
-            }
-        }
-
         // Literals_Section_Header (Raw, litType 0). Regenerated_Size = literals
         // length, encoded with the 1/2/3-byte size_format variants.
         writeRawLiteralsHeader(out, literals.size)
         literals.forEach { out.add(it) }
     }
 
-    private const val TREELESS_HEADER_LEN = 3
+    /** RLE literals (litType 1): header + the single repeated byte, or null. */
+    private fun buildRleLiterals(literals: ByteArray): ByteArray? {
+        val constant = constantByteOrNull(literals) ?: return null
+        val section = ArrayList<Byte>(4)
+        writeRawOrRleLiteralsHeader(section, literals.size, litType = 1)
+        section.add(constant)
+        return ByteArray(section.size) { section[it] }
+    }
+
+    /**
+     * Treeless literals (litType 3): the dictionary's own Huffman table, so the
+     * section carries no tree description -- only the header and the stream.
+     * Null when there is no dict table, it does not cover some literal byte, or
+     * the result overflows the single-stream size fields.
+     */
+    private fun buildTreelessLiterals(literals: ByteArray, dict: ParsedDictionary): ByteArray? {
+        val huffman = dict.literalsHuffman ?: return null
+        if (literals.isEmpty() || literals.size > MAX_SINGLE_STREAM_LITERALS) return null
+        val encTable = HuffmanEncTable.fromDecodeTable(huffman)
+        for (b in literals) if (!encTable.isCovered(b.toInt() and 0xFF)) return null
+        val stream = huffmanLiteralsStream(literals, encTable)
+        if (stream.size > MAX_SINGLE_STREAM_LITERALS) return null
+        return literalsSection(litType = 3, regenSize = literals.size, body = stream)
+    }
+
+    /**
+     * Huffman_Compressed literals (litType 2): a canonical table built from this
+     * block's own byte histogram, described on the wire ahead of the stream.
+     * Null when the alphabet cannot be Huffman-coded at all
+     * ([buildLiteralsHuffman]) or the result overflows the single-stream size
+     * fields.
+     */
+    private fun buildHuffmanLiterals(literals: ByteArray): ByteArray? {
+        if (literals.isEmpty() || literals.size > MAX_SINGLE_STREAM_LITERALS) return null
+        val histogram = IntArray(256)
+        for (b in literals) histogram[b.toInt() and 0xFF]++
+        val table = buildLiteralsHuffman(histogram) ?: return null
+        val stream = huffmanLiteralsStream(literals, table.encoder)
+        // Compressed_Size counts the tree description AND the stream.
+        val body = table.description + stream
+        if (body.size > MAX_SINGLE_STREAM_LITERALS) return null
+        return literalsSection(litType = 2, regenSize = literals.size, body = body)
+    }
+
+    /**
+     * Huffman-code [literals] into one backward bitstream. Written in reverse so
+     * the decoder, reading the stream backward from its stop bit, recovers them
+     * in order.
+     *
+     * The bitstream is built in full rather than having its length estimated
+     * from summed code lengths -- the trailing stop bit (see [ReverseBitWriter])
+     * can push the real length one byte past a naive `ceil(totalBits/8)`.
+     */
+    private fun huffmanLiteralsStream(literals: ByteArray, encTable: HuffmanEncTable): ByteArray {
+        val bw = ReverseBitWriter()
+        for (i in literals.size - 1 downTo 0) encTable.encode(bw, literals[i].toInt() and 0xFF)
+        return bw.finish()
+    }
+
+    /**
+     * A complete Huffman-coded Literals_Section: the size_format-0 header
+     * (single stream, 10-bit Regenerated_Size / Compressed_Size) followed by
+     * [body] -- the inverse of [PureZstdDecoder]'s size_format-0 read. For
+     * litType 2 the body is the tree description plus the stream; for litType 3
+     * it is the stream alone.
+     */
+    private fun literalsSection(litType: Int, regenSize: Int, body: ByteArray): ByteArray {
+        val b0 = litType or ((regenSize and 0xF) shl 4)
+        val b1 = ((regenSize ushr 4) and 0x3F) or ((body.size and 0x3) shl 6)
+        val b2 = (body.size ushr 2) and 0xFF
+        val out = ByteArray(3 + body.size)
+        out[0] = b0.toByte()
+        out[1] = b1.toByte()
+        out[2] = b2.toByte()
+        body.copyInto(out, 3)
+        return out
+    }
 
     private fun rawLiteralsHeaderLen(size: Int): Int = when {
         size < 32 -> 1
         size < 4096 -> 2
         else -> 3
-    }
-
-    /**
-     * litType=3 (Treeless), size_format=0 (single stream, 10-bit
-     * Regenerated_Size / Compressed_Size) -- the inverse of
-     * [PureZstdDecoder]'s size_format-0 Huffman-literals header read.
-     */
-    private fun writeTreelessHuffmanLiteralsHeader(out: ArrayList<Byte>, regenSize: Int, compressedSize: Int) {
-        val b0 = 3 or ((regenSize and 0xF) shl 4)
-        val b1 = ((regenSize ushr 4) and 0x3F) or ((compressedSize and 0x3) shl 6)
-        val b2 = (compressedSize ushr 2) and 0xFF
-        out.add(b0.toByte())
-        out.add(b1.toByte())
-        out.add(b2.toByte())
     }
 
     private fun writeRawLiteralsHeader(out: ArrayList<Byte>, size: Int) =
