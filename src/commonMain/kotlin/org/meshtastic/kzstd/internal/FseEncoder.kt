@@ -53,23 +53,51 @@ internal class FseEncTable private constructor(
      * initial state via [initialState].
      */
     fun encode(bw: ReverseBitWriter, state: Int, symbol: Int): Int {
-        val states = symbolStates[symbol]
-        // Find the decode-state `ds` emitting `symbol` whose output range
-        // [base, base + 2^nb) contains the target `state`. Ranges partition
-        // [0,tableSize), so exactly one matches. The encoder emits `state - base`
-        // in `nb` bits and moves to `ds`.
-        for (ds in states) {
-            val nb = nbBits[ds]
+        val ds = transition(state, symbol)
+        bw.writeBits(state - newStateBase[ds], nbBits[ds])
+        return ds
+    }
+
+    /**
+     * The decode-state `ds` emitting [symbol] whose output range
+     * `[base, base + 2^nb)` contains [state]. Ranges partition `[0,tableSize)`,
+     * so exactly one matches; the caller emits `state - base` in `nb` bits and
+     * moves to `ds`.
+     */
+    private fun transition(state: Int, symbol: Int): Int {
+        for (ds in symbolStates[symbol]) {
             val base = newStateBase[ds]
-            val hi = base + (1 shl nb)
-            if (state in base until hi) {
-                bw.writeBits(state - base, nb)
-                return ds
-            }
+            if (state >= base && state < base + (1 shl nbBits[ds])) return ds
         }
         // The FSE invariant guarantees a match; reaching here means a corrupt
         // table or an out-of-range symbol the caller failed to bound.
         throw ZstdException("FSE encode: no transition for symbol $symbol from state $state")
+    }
+
+    /**
+     * Exactly how many bits encoding [codes] (chronological order) with this
+     * table would cost — every transition plus the flushed initial state — or
+     * null when some code has no code point here ([isCovered]).
+     *
+     * This walks the SAME path [encode] does (backwards from the last code,
+     * starting at [initialState]), so it is an exact count and not an entropy
+     * estimate: the cost model that chooses between Predefined / RLE /
+     * FSE_Compressed / Repeat can therefore never pick a mode that turns out
+     * bigger than it predicted. Bits from the three sequence streams simply
+     * add, so streams can be costed independently even though they interleave
+     * in the final bitstream.
+     */
+    fun streamBitCost(codes: IntArray): Long? {
+        if (codes.isEmpty()) return null
+        for (c in codes) if (!isCovered(c)) return null
+        var state = initialState(codes[codes.size - 1])
+        var bits = 0L
+        for (i in codes.size - 2 downTo 0) {
+            val ds = transition(state, codes[i])
+            bits += nbBits[ds]
+            state = ds
+        }
+        return bits + tableLog
     }
 
     /**

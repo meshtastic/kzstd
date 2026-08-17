@@ -172,12 +172,162 @@ internal object TestVectors {
         "28b52ffd230d92503b9435010063010399c65a69e84756accc8c4a8508fc8f87036d206e18b8ca544a6861d98e86a8f857ef0d",
     )
 
+    /**
+     * One byte value, repeated: the RLE_Block (Block_Type 1) case — the whole
+     * block collapses to a single stored byte.
+     */
+    val constantBytes: ByteArray = ByteArray(1500) { 'Q'.code.toByte() }
+
+    /**
+     * Twenty-six eight-byte single-letter runs. Every run compresses to the SAME
+     * sequence — one literal, a 7-byte match at distance 1 (which is the initial
+     * repeat-offset slot, so its offset code is 0) — so each of the three
+     * LL/OF/ML symbol streams is a single repeated code (RLE, mode 1) and none
+     * of those codes carries extra bits: the sequence bitstream ends up holding
+     * nothing but its stop bit.
+     */
+    val byteRuns: ByteArray = buildString {
+        for (c in 'a'..'z') append(c.toString().repeat(8))
+    }.encodeToByteArray()
+
+    /**
+     * A RAW-content dictionary (no trained-dict magic ⇒ content only, no entropy
+     * tables), used with [rleLiteralsSample] to reach RLE literals: every phrase
+     * of the sample is a match into this content, leaving only the separator
+     * bytes as literals.
+     */
+    val rawContentDict: ByteArray =
+        "the quick brown fox jumps over the lazy dog while nominal reports stream steadily"
+            .encodeToByteArray()
+
+    /**
+     * Phrases from [rawContentDict] separated by a single repeated byte. Each
+     * phrase becomes a dictionary match and each separator a one-byte literal
+     * run, so the block's whole literals buffer is one byte value repeated —
+     * RLE literals (Literals_Block_Type 1) — while the block itself is far from
+     * constant.
+     */
+    val rleLiteralsSample: ByteArray = (
+        "A" + "the quick brown fox " +
+            "A" + "jumps over the lazy " +
+            "A" + "dog while nominal " +
+            "A" + "reports stream steadily"
+        ).encodeToByteArray()
+
+    /**
+     * ~7.8 KB of synthetic JSON telemetry records: realistic, genuinely
+     * compressible payload with enough sequences (hundreds) for a block's own
+     * FSE tables to repay their descriptions, and literals skewed enough for a
+     * fresh Huffman table. Generated from a fixed LCG, so it is byte-identical
+     * on every target.
+     */
+    val logRecords: ByteArray = buildRecords(60)
+
+    /**
+     * ~51 KB of the same synthetic telemetry — enough sequences (a few
+     * thousand) to push the literal-length and match-length Accuracy_Log to the
+     * format's ceiling, and far more than 1023 literals, so this is the
+     * "raw literals + a fresh FSE table on every stream" combination, with the
+     * longest table descriptions the encoder can write. Sized to stay within one
+     * 128 KiB block (Block_Maximum_Size), so the case is exercised without also
+     * spanning a multi-block chain.
+     */
+    val largeLogRecords: ByteArray = buildRecords(400)
+
+    /**
+     * Literals with FIBONACCI counts — the classic worst case for Huffman
+     * depth: an unconstrained tree over them is a chain far deeper than the
+     * 11-bit limit the encoder allows, so this drives the length-limiting
+     * repair end to end (and through libzstd) rather than only in unit tests.
+     */
+    val deepSkewLiterals: ByteArray = buildDeepSkew()
+
+    private fun buildDeepSkew(): ByteArray {
+        val counts = ArrayList<Int>()
+        var a = 1
+        var b = 1
+        while (counts.sum() + a <= 1000) {
+            counts.add(a)
+            val next = a + b
+            a = b
+            b = next
+        }
+        val pool = ArrayList<Byte>()
+        for (s in counts.indices) repeat(counts[s]) { pool.add((s + 1).toByte()) }
+        // Deterministic shuffle, so few long repeats survive for the matcher and
+        // most bytes stay literals.
+        var seed = 0x5EED5EED
+        for (i in pool.indices.reversed()) {
+            seed = (seed * 1103515245 + 12345) and 0x7FFFFFFF
+            val j = (seed ushr 8) % (i + 1)
+            val t = pool[i]
+            pool[i] = pool[j]
+            pool[j] = t
+        }
+        return ByteArray(pool.size) { pool[it] }
+    }
+
+    private fun buildRecords(count: Int): ByteArray {
+        var seed = 0x2468ACE
+        fun next(): Int {
+            seed = (seed * 1103515245 + 12345) and 0x7FFFFFFF
+            return seed ushr 8
+        }
+        val states = listOf("ok", "warn", "offline", "degraded", "recovering", "unknown")
+        val words = listOf(
+            "region", "latency", "throughput", "stable", "nominal",
+            "monitored", "link", "quick", "fox", "dog",
+        )
+        val sb = StringBuilder()
+        repeat(count) {
+            val msg = (0 until 3 + next() % 6).joinToString(" ") { words[next() % words.size] }
+            sb.append("{\"type\":\"telemetry\",\"seq\":").append(next() % 1000000)
+                .append(",\"node\":\"node-").append(next() % 64)
+                .append("\",\"state\":\"").append(states[next() % states.size])
+                .append("\",\"lat\":").append(next() % 90).append('.').append(next() % 100000)
+                .append(",\"msg\":\"").append(msg).append("\"}")
+        }
+        return sb.toString().encodeToByteArray()
+    }
+
+    /**
+     * Skewed draws over ~90 byte values, with essentially no repeated
+     * substrings: nearly every byte stays a literal, so the block's literals
+     * exercise a wide Huffman alphabet whose counts differ by orders of
+     * magnitude (long weight descriptions, and code lengths spread far enough
+     * to reach the length limit).
+     */
+    val skewedAlphabet: ByteArray = mappedPseudoRandom(900) { r ->
+        val x = r % 120
+        x * x / 120
+    }
+
+    /**
+     * Near-uniform draws over 127 byte values — close to the widest alphabet a
+     * direct (non-FSE-compressed) Huffman_Tree_Description can carry, and the
+     * least favourable shape for Huffman coding that still pays for itself.
+     */
+    val wideAlphabet: ByteArray = mappedPseudoRandom(900) { r -> r % 127 }
+
     /** The exact plaintext [treelessDictFrame] must decode to (verified by DictEntropyDecodeTest). */
     val treelessDictPlaintext: ByteArray = hexToBytes(
         "7b2274797065223a22686561727462656174222c22736571223a3634383838362c226e6f6465223a226e6f64652d3233222c227374617465223a226f6b222c226c6174223a2d36382e32303131302c226c6f6e223a2d32352e36383235352c226d7367223a22726567696f6e20616e64206e6f6d696e616c206e6f6d696e616c206d6f6e69746f7265642074686520746865227d",
     )
 
     private fun hexToBytes(s: String): ByteArray = ByteArray(s.length / 2) { ((s[it * 2].digitToInt(16) shl 4) or s[it * 2 + 1].digitToInt(16)).toByte() }
+
+    /**
+     * Deterministic pseudo-random bytes drawn through [toSymbol], which maps a
+     * fresh LCG value to a byte value — the way to build a payload with a
+     * chosen alphabet size and skew that is identical on every target.
+     */
+    private fun mappedPseudoRandom(n: Int, toSymbol: (Int) -> Int): ByteArray {
+        var s = 0x12345678
+        return ByteArray(n) {
+            s = (s * 1103515245 + 12345) and 0x7FFFFFFF
+            toSymbol(s ushr 8).toByte()
+        }
+    }
 
     /** Deterministic pseudo-random bytes (a 32-bit LCG) — incompressible-ish input. */
     private fun pseudoRandom(n: Int): ByteArray {

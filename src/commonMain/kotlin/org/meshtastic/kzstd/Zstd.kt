@@ -13,10 +13,12 @@ import org.meshtastic.kzstd.internal.PureZstdEncoder
  * no cross-call state, so every frame is independently decodable (what packet /
  * mesh transports need).
  *
- * [compress] emits a single zstd block per frame, so its input is bounded by zstd's
- * 128 KiB `Block_Maximum_Size`; a larger input throws [ZstdException] (multi-block
- * encoding is a planned addition). [decompress] reads any conformant frame,
- * including multi-block frames produced by other encoders.
+ * [compress] takes an input of any size: it cuts the input into zstd's 128 KiB
+ * `Block_Maximum_Size` chunks and emits them as one multi-block frame. The chunks
+ * are compressed independently — a match never reaches back into an earlier
+ * block — so a large input compresses somewhat less well than a windowed encoder
+ * would manage. [decompress] reads any conformant frame, including multi-block
+ * frames produced by other encoders.
  *
  * Pass a [ZstdDictionary] for dictionary compression; the dictionary-less
  * overloads operate on plain frames.

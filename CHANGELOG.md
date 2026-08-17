@@ -7,9 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Encoder-side parity work closing several gaps against the libzstd/RFC 8878
-spec — real ratio improvements for dictionary-compressed frames, no wire
-format or public-API changes (except where noted below, for the
-Content_Checksum fix).
+spec — the 128 KiB single-block input limit lifted, real ratio improvements
+for both dictionary-compressed and dictionary-free frames, plus
+dictionary-ID and content-checksum validation. No wire format or
+public-API changes, except where noted below.
 
 ### Fixed
 
@@ -19,6 +20,9 @@ Content_Checksum fix).
   content, for ANY conformant frame — not just kzstd's own — so a real
   `libzstd`-produced frame (checksums are on by default in the `zstd` CLI)
   is no longer accepted with silently-corrupted content.
+- The decoder now validates a frame's declared Dictionary_ID against the
+  supplied dictionary's own embedded ID (when both are present), throwing a
+  clear `ZstdException` on mismatch instead of a generic corruption error.
 
 ### Added
 
@@ -26,6 +30,18 @@ Content_Checksum fix).
   true, the encoder sets `Content_Checksum_Flag` and appends the XXH64
   checksum of the input. Defaults to false, so every existing call site's
   frame bytes are unchanged.
+- `Zstd.compress` now accepts input up to 128 MiB (dictionary content + data
+  combined), up from 128 KiB. It cuts the input into 128 KiB
+  (`Block_Maximum_Size`) chunks and emits them as one multi-block frame,
+  `Last_Block` set on the final block only; anything larger than 128 KiB used
+  to be rejected with a `ZstdException`. The new 128 MiB ceiling replaces that
+  guard: beyond it, the frame's required window would exceed libzstd's default
+  decompression limit (`ZSTD_WINDOWLOG_LIMIT_DEFAULT`), so it's still rejected
+  rather than emitting a frame most real-world libzstd consumers would refuse.
+  `Zstd.decompress` has always read multi-block frames from any encoder, and
+  real libzstd reads these. 3 MB of synthetic JSON telemetry compresses to
+  556,657 bytes across 24 blocks — between libzstd's level 3 (579,374) and
+  level 19 (362,967).
 
 ### Changed
 
@@ -38,11 +54,39 @@ Content_Checksum fix).
   needs and doing so is smaller than the previous fallback (predefined FSE
   tables, raw literals) — a real, measurable size reduction for
   dictionary-compressed frames, not just a wire-format curiosity (#50, #51).
+- Without a dictionary — the plain `Zstd.compress(data)` call — the encoder now
+  entropy-codes each block from the block's OWN data, where before it could
+  only emit raw literals and the spec's predefined FSE distributions: Huffman
+  literals built from the block's byte histogram (`Literals_Block_Type` 2), and
+  FSE tables for the literal-length / offset / match-length streams normalized
+  from the block's own code counts (`Symbol_Compression_Mode` 2). Measured:
+  ~7.8 KB of synthetic JSON telemetry records 2007 → 1521 bytes, 887 bytes of
+  concatenated structured records 487 → 425, a 208-byte prose sample 213 → 190.
+- The encoder now also emits the RLE forms the decoder has always read:
+  `RLE_Block` for a constant input (a 1500-byte run of one byte, 17 → 10
+  bytes), RLE literals when every literal is the same byte, and RLE sequence
+  tables when a stream's every code is the same (a sample of 26 byte-runs,
+  85 → 42 bytes).
+- Every per-block encoding choice — the literals section and each of the three
+  sequence streams independently — is now made by measuring every valid
+  alternative and taking the smallest, so a form is used only when it actually
+  wins. Ties keep the previous behaviour, and dictionary-compressed frames come
+  out the same size as before.
+- Entropy tables and the three repeat offsets are now carried from block to
+  block within a frame, which is what the format means by them: "Repeat"
+  sequence tables and "Treeless" literals name the PREVIOUS block's tables, and
+  the dictionary's only for a frame's first block. A later block therefore
+  reuses a table for nothing instead of describing its own, and a `Raw` or
+  `RLE` block describes nothing and so leaves the state untouched — the block
+  after a stretch of incompressible data still reaches the dictionary's own
+  tables. A 128 KiB noise block followed by a dictionary-trained sample
+  compresses that sample's block to 46 bytes rather than 54.
 - `level` (1–22) now governs match-finding search depth: higher levels search
   more candidate matches per position, which can shrink output at the cost of
-  more work. Level 19 (`Zstd.DEFAULT_LEVEL`) is byte-identical to every
-  earlier release; the encoder still uses one fixed strategy at every level,
-  not zstd's other per-level parameters (#52).
+  more work. Level 19 (`Zstd.DEFAULT_LEVEL`) maps to exactly the search depth
+  the encoder always used, so the mapping itself changes no output; the encoder
+  still uses one fixed strategy at every level, not zstd's other per-level
+  parameters (#52).
 
 ### Fixed
 
@@ -58,6 +102,18 @@ Content_Checksum fix).
 
 ### Notes
 
+- Blocks are compressed independently: a match never reaches back into an
+  earlier block's output, only into this block and the dictionary. Large
+  inputs therefore compress less well than a windowed encoder would manage —
+  and combined with the 1023-byte literals cap below, a full 128 KiB block
+  keeps raw literals and takes its ratio from the sequence tables alone. A
+  windowed, cross-block matcher is the follow-up.
+- Huffman-coded literals stay single-stream, so they apply to at most 1023
+  bytes of literals per block, and their tree description uses the direct
+  4-bit weight form, so a block containing a literal byte above 128 falls back
+  to raw literals. FSE-compressed weight descriptions and the 4-stream literals
+  layout would lift those limits and are not implemented; neither affects
+  decoding, which reads both.
 - A dictionary-compressed frame's correctness now depends on the dictionary's
   entropy tables matching what the decoder is seeded with, not just its
   content — decoding with the wrong dictionary was already silently wrong
