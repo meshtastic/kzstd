@@ -7,9 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 Encoder-side parity work closing several gaps against the libzstd/RFC 8878
-spec — real ratio improvements for both dictionary-compressed and
-dictionary-free frames, plus dictionary-ID and content-checksum validation.
-No wire format or public-API changes, except where noted below.
+spec — the 128 KiB single-block input limit lifted, real ratio improvements
+for both dictionary-compressed and dictionary-free frames, plus
+dictionary-ID and content-checksum validation. No wire format or
+public-API changes, except where noted below.
 
 ### Fixed
 
@@ -29,6 +30,13 @@ No wire format or public-API changes, except where noted below.
   true, the encoder sets `Content_Checksum_Flag` and appends the XXH64
   checksum of the input. Defaults to false, so every existing call site's
   frame bytes are unchanged.
+- `Zstd.compress` now accepts input up to 128 MiB. It cuts the input into
+  128 KiB (`Block_Maximum_Size`) chunks and emits them as one multi-block
+  frame, `Last_Block` set on the final block only; anything larger than
+  128 KiB used to be rejected with a `ZstdException`. `Zstd.decompress` has
+  always read multi-block frames from any encoder, and real libzstd reads
+  these. 3 MB of synthetic JSON telemetry compresses to 556,657 bytes across
+  24 blocks — between libzstd's level 3 (579,374) and level 19 (362,967).
 
 ### Changed
 
@@ -59,6 +67,15 @@ No wire format or public-API changes, except where noted below.
   alternative and taking the smallest, so a form is used only when it actually
   wins. Ties keep the previous behaviour, and dictionary-compressed frames come
   out the same size as before.
+- Entropy tables and the three repeat offsets are now carried from block to
+  block within a frame, which is what the format means by them: "Repeat"
+  sequence tables and "Treeless" literals name the PREVIOUS block's tables, and
+  the dictionary's only for a frame's first block. A later block therefore
+  reuses a table for nothing instead of describing its own, and a `Raw` or
+  `RLE` block describes nothing and so leaves the state untouched — the block
+  after a stretch of incompressible data still reaches the dictionary's own
+  tables. A 128 KiB noise block followed by a dictionary-trained sample
+  compresses that sample's block to 46 bytes rather than 54.
 - `level` (1–22) now governs match-finding search depth: higher levels search
   more candidate matches per position, which can shrink output at the cost of
   more work. Level 19 (`Zstd.DEFAULT_LEVEL`) maps to exactly the search depth
@@ -80,6 +97,12 @@ No wire format or public-API changes, except where noted below.
 
 ### Notes
 
+- Blocks are compressed independently: a match never reaches back into an
+  earlier block's output, only into this block and the dictionary. Large
+  inputs therefore compress less well than a windowed encoder would manage —
+  and combined with the 1023-byte literals cap below, a full 128 KiB block
+  keeps raw literals and takes its ratio from the sequence tables alone. A
+  windowed, cross-block matcher is the follow-up.
 - Huffman-coded literals stay single-stream, so they apply to at most 1023
   bytes of literals per block, and their tree description uses the direct
   4-bit weight form, so a block containing a literal byte above 128 falls back

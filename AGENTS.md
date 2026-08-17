@@ -36,10 +36,14 @@ would be over-engineering here.
 
 - **One-shot only (no incremental streaming API yet).** Every frame is independently
   decodable; there is no cross-call state.
-- **One block per frame (current limit).** The encoder emits a single block, so
-  `compress` rejects inputs > 128 KiB (zstd's `Block_Maximum_Size`) with a
-  `ZstdException`. Keep that guard until multi-block encoding lands — without it a
-  large input silently produces a frame neither libzstd nor kzstd can decode.
+- **Blocks are independent, and per-frame state is threaded through them.** The
+  encoder cuts input into 128 KiB (`Block_Maximum_Size`) chunks and emits a
+  multi-block frame; a chunk is matched only against itself and the dictionary,
+  never against an earlier block's output. The three repeat offsets and the tables
+  the "Repeat" / "Treeless" modes name are FRAME state — `PureZstdEncoder`'s
+  `FrameEntropy` must keep mirroring `PureZstdDecoder`'s `DecodeState` exactly, or
+  a mode names one table on each side and the frame decodes to garbage that only
+  a real-libzstd oracle catches.
 - **No shared mutable state, no lock.** A `ZstdDictionary` digests its dictionary
   once in its constructor and is immutable thereafter; the engine objects keep all
   per-call state in locals. Do not reintroduce global caches. The encoder's

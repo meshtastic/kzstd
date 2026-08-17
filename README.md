@@ -66,17 +66,22 @@ val back = Zstd.decompress(small, dict, maxSize = 64 * 1024)
   other per-level parameters (window log, target length, etc.) — but a higher
   level does search more candidate matches per position, which can shrink output
   at the cost of more work. Frames remain fully libzstd-compatible at every level.
-- **Single block per frame (≤ 128 KiB input).** `Zstd.compress` emits one zstd block,
-  so its input is bounded by zstd's 128 KiB `Block_Maximum_Size`; a larger input
-  throws `ZstdException`. (`Zstd.decompress` reads multi-block frames from any
-  encoder.) Multi-block encoding to lift the cap is planned.
+- **Blocks are compressed independently (no cross-block matching).** `Zstd.compress`
+  takes an input of any size, cutting it into zstd's 128 KiB `Block_Maximum_Size`
+  chunks and emitting one multi-block frame. Each chunk is matched only against
+  itself and the dictionary, never against an earlier block's output, so a large
+  input compresses less well than a windowed encoder manages — 3 MB of synthetic
+  JSON telemetry lands between libzstd's levels 3 and 19. Entropy tables and the
+  repeat offsets ARE carried across blocks. A windowed matcher is a planned
+  improvement.
 - **Huffman-coded literals are single-stream and directly described.** The encoder
   builds a Huffman table from a block's own literals, but writes only the
   single-stream layout (so it applies to at most 1023 bytes of literals per block)
   and only the direct 4-bit weight tree description (so a block containing a literal
   byte above 128 falls back to raw literals). Both limits are encoder-side only —
   `Zstd.decompress` reads the 4-stream layout and FSE-compressed weight descriptions
-  that libzstd emits.
+  that libzstd emits. The 1023-byte cap is why a full 128 KiB block keeps raw
+  literals: on large inputs the ratio comes from the sequence tables alone.
 
 ## Interoperability
 
