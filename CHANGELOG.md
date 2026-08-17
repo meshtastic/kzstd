@@ -12,18 +12,6 @@ for both dictionary-compressed and dictionary-free frames, plus
 dictionary-ID and content-checksum validation. No wire format or
 public-API changes, except where noted below.
 
-### Fixed
-
-- The decoder now validates a frame's Content_Checksum when
-  `Content_Checksum_Flag` is set: it reads the trailing 4-byte XXH64
-  checksum and throws `ZstdException` on a mismatch against the decoded
-  content, for ANY conformant frame — not just kzstd's own — so a real
-  `libzstd`-produced frame (checksums are on by default in the `zstd` CLI)
-  is no longer accepted with silently-corrupted content.
-- The decoder now validates a frame's declared Dictionary_ID against the
-  supplied dictionary's own embedded ID (when both are present), throwing a
-  clear `ZstdException` on mismatch instead of a generic corruption error.
-
 ### Added
 
 - `Zstd.compress` takes an opt-in `checksum: Boolean = false` parameter; when
@@ -90,6 +78,12 @@ public-API changes, except where noted below.
 
 ### Fixed
 
+- The decoder now validates a frame's Content_Checksum when
+  `Content_Checksum_Flag` is set: it reads the trailing 4-byte XXH64
+  checksum and throws `ZstdException` on a mismatch against the decoded
+  content, for ANY conformant frame — not just kzstd's own — so a real
+  `libzstd`-produced frame (checksums are on by default in the `zstd` CLI)
+  is no longer accepted with silently-corrupted content.
 - The decoder now validates a frame's Dictionary_ID (RFC 8878 §3.1.1.3)
   against the supplied dictionary's own embedded Dictionary_ID (RFC 8878
   §5), when both are present. Decoding a real libzstd frame (which sets a
@@ -114,12 +108,15 @@ public-API changes, except where noted below.
   to raw literals. FSE-compressed weight descriptions and the 4-stream literals
   layout would lift those limits and are not implemented; neither affects
   decoding, which reads both.
-- A dictionary-compressed frame's correctness now depends on the dictionary's
+- A dictionary-compressed frame's correctness depends on the dictionary's
   entropy tables matching what the decoder is seeded with, not just its
-  content — decoding with the wrong dictionary was already silently wrong
-  before this work (kzstd enforces no `Dictionary_ID`), so this doesn't
-  introduce a new failure mode, just makes an existing one marginally more
-  sensitive. Use the same trained dictionary bytes on both ends, as always.
+  content. The Dictionary_ID check above catches this when both the frame and
+  the supplied dictionary are proper-format (embedded-ID) dictionaries with
+  different IDs; it can't catch a wrong raw-content dictionary (no embedded ID
+  to compare) or a frame with no declared Dictionary_ID (kzstd's own encoder
+  never sets one) — those still decode with whatever tables the wrong
+  dictionary provides, silently. Use the same trained dictionary bytes on
+  both ends, as always.
 
 ## [0.1.2]
 
