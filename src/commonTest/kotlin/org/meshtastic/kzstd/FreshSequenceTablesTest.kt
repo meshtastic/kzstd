@@ -55,13 +55,16 @@ class FreshSequenceTablesTest {
     fun freshTablesRoundTripAcrossVariedInputs() {
         val inputs = TestVectors.corpus + listOf(
             TestVectors.logRecords,
+            TestVectors.largeLogRecords,
+            TestVectors.deepSkewLiterals,
             TestVectors.byteRuns,
             TestVectors.skewedAlphabet,
             TestVectors.structured.reduce { a, b -> a + b },
         )
         for (sample in inputs) {
             val frame = Zstd.compress(sample)
-            assertContentEquals(sample, Zstd.decompress(frame, max), "size=${sample.size}")
+            val cap = maxOf(max, sample.size + 1024)
+            assertContentEquals(sample, Zstd.decompress(frame, cap), "size=${sample.size}")
         }
     }
 }

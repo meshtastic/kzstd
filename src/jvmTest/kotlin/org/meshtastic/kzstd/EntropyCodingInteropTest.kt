@@ -67,10 +67,13 @@ class EntropyCodingInteropTest {
                 "targets even when the region degrades to offline for a while. "
             ).encodeToByteArray(),
         TestVectors.structured.reduce { a, b -> a + b },
-        // Wide alphabets: long weight descriptions, and (for the skewed one)
-        // code lengths spread far enough to reach the length limit.
+        // Wide alphabets: long weight descriptions.
         TestVectors.skewedAlphabet,
         TestVectors.wideAlphabet,
+        // Fibonacci counts: the tree is deeper than the format allows, so the
+        // table libzstd rebuilds here is one the length-limiting repair
+        // reshaped.
+        TestVectors.deepSkewLiterals,
     )
 
     /**
@@ -90,6 +93,33 @@ class EntropyCodingInteropTest {
             "expected fresh FSE tables for LL/OF/ML",
         )
         assertContentEquals(data, LibZstd.decompress(frame, max))
+    }
+
+    /**
+     * The extremes of the FSE description writer, in one frame: ~51 KB of
+     * telemetry produces thousands of sequences, which pushes the
+     * literal-length Accuracy_Log to the format's ceiling of 9 (the longest
+     * descriptions the encoder can write, and the most field-width shrink steps
+     * for a reader to follow), spills Number_of_Sequences into its 2-byte form,
+     * and leaves far more than 1023 literals so the literals section falls back
+     * to Raw while all three sequence streams still carry fresh tables.
+     *
+     * Every smaller oracle case sits well below those limits, so without this
+     * one the writer's widest tables would only ever be checked against kzstd's
+     * own parser.
+     */
+    @Test
+    fun maxAccuracyLogTablesDecodeUnderLibzstd() {
+        val data = TestVectors.largeLogRecords
+        val frame = Zstd.compress(data)
+        assertEquals(Triple(2, 2, 2), FrameInspector.sequenceModes(frame), "expected fresh FSE tables")
+        assertEquals(0, FrameInspector.literalsType(frame), "expected Raw literals past the single-stream cap")
+        assertEquals(
+            9,
+            FrameInspector.literalLengthAccuracyLog(frame),
+            "expected the maximum literal-length Accuracy_Log",
+        )
+        assertContentEquals(data, LibZstd.decompress(frame, data.size + 1024))
     }
 
     /** Every dictionary-free encoding choice, over the whole round-trip corpus. */

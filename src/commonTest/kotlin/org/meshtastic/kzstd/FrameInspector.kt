@@ -46,20 +46,54 @@ internal object FrameInspector {
         p += 3
         p = skipLiteralsSection(frame, p)
 
+        if (sequenceCountAt(frame, p) == 0) return null
+        p += sequenceCountFieldLen(frame, p)
+        val modes = frame[p].toInt() and 0xFF
+        return Triple((modes ushr 6) and 0x3, (modes ushr 4) and 0x3, (modes ushr 2) and 0x3)
+    }
+
+    /** Number_of_Sequences of the first block (0 when it carries none). */
+    fun sequenceCount(frame: ByteArray): Int {
+        var p = frameHeaderEnd(frame) + 3
+        p = skipLiteralsSection(frame, p)
+        return sequenceCountAt(frame, p)
+    }
+
+    /**
+     * Accuracy_Log of the LITERAL-LENGTH stream's FSE table description, or
+     * null unless that stream is in FSE_Compressed mode. The description's
+     * first byte holds `Accuracy_Log - 5` in its low 4 bits.
+     *
+     * Only the first stream's log is readable without decoding a whole
+     * description (they are variable-length), and the literal-length stream
+     * comes first — which is enough, since it is also the stream whose
+     * Accuracy_Log reaches the format's ceiling first.
+     */
+    fun literalLengthAccuracyLog(frame: ByteArray): Int? {
+        var p = frameHeaderEnd(frame) + 3
+        p = skipLiteralsSection(frame, p)
+        p += sequenceCountFieldLen(frame, p)
+        val modes = frame[p].toInt() and 0xFF
+        if ((modes ushr 6) and 0x3 != 2) return null
+        return (frame[p + 1].toInt() and 0xF) + 5
+    }
+
+    private fun sequenceCountAt(frame: ByteArray, p: Int): Int {
         val nb0 = frame[p].toInt() and 0xFF
-        val nbSeq = when {
+        return when {
             nb0 < 128 -> nb0
             nb0 < 255 -> ((nb0 - 128) shl 8) + (frame[p + 1].toInt() and 0xFF)
             else -> (frame[p + 1].toInt() and 0xFF) + ((frame[p + 2].toInt() and 0xFF) shl 8) + 0x7F00
         }
-        if (nbSeq == 0) return null
-        p += when {
+    }
+
+    private fun sequenceCountFieldLen(frame: ByteArray, p: Int): Int {
+        val nb0 = frame[p].toInt() and 0xFF
+        return when {
             nb0 < 128 -> 1
             nb0 < 255 -> 2
             else -> 3
         }
-        val modes = frame[p].toInt() and 0xFF
-        return Triple((modes ushr 6) and 0x3, (modes ushr 4) and 0x3, (modes ushr 2) and 0x3)
     }
 
     /** Byte offset of the first Block_Header. */

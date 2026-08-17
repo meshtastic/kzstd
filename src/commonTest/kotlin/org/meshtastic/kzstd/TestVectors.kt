@@ -223,6 +223,49 @@ internal object TestVectors {
      */
     val logRecords: ByteArray = buildRecords(60)
 
+    /**
+     * ~51 KB of the same synthetic telemetry — enough sequences (a few
+     * thousand) to push the literal-length and match-length Accuracy_Log to the
+     * format's ceiling, and far more than 1023 literals, so this is the
+     * "raw literals + a fresh FSE table on every stream" combination, with the
+     * longest table descriptions the encoder can write. Sized to stay under the
+     * 128 KiB single-block limit.
+     */
+    val largeLogRecords: ByteArray = buildRecords(400)
+
+    /**
+     * Literals with FIBONACCI counts — the classic worst case for Huffman
+     * depth: an unconstrained tree over them is a chain far deeper than the
+     * 11-bit limit the encoder allows, so this drives the length-limiting
+     * repair end to end (and through libzstd) rather than only in unit tests.
+     */
+    val deepSkewLiterals: ByteArray = buildDeepSkew()
+
+    private fun buildDeepSkew(): ByteArray {
+        val counts = ArrayList<Int>()
+        var a = 1
+        var b = 1
+        while (counts.sum() + a <= 1000) {
+            counts.add(a)
+            val next = a + b
+            a = b
+            b = next
+        }
+        val pool = ArrayList<Byte>()
+        for (s in counts.indices) repeat(counts[s]) { pool.add((s + 1).toByte()) }
+        // Deterministic shuffle, so few long repeats survive for the matcher and
+        // most bytes stay literals.
+        var seed = 0x5EED5EED
+        for (i in pool.indices.reversed()) {
+            seed = (seed * 1103515245 + 12345) and 0x7FFFFFFF
+            val j = (seed ushr 8) % (i + 1)
+            val t = pool[i]
+            pool[i] = pool[j]
+            pool[j] = t
+        }
+        return ByteArray(pool.size) { pool[it] }
+    }
+
     private fun buildRecords(count: Int): ByteArray {
         var seed = 0x2468ACE
         fun next(): Int {

@@ -96,6 +96,11 @@ class HuffmanConstructionTest {
                 "symbol $s has out-of-range code length ${built.encoder.bitLength(s)}",
             )
         }
+        assertEquals(
+            MAX_LITERAL_CODE_BITS,
+            (0 until 40).maxOf { built.encoder.bitLength(it) },
+            "the limit should BIND here — if the longest code is shorter, this input stopped testing the repair",
+        )
         assertDescriptionRoundTrips(hist, built.description, built.encoder)
     }
 
