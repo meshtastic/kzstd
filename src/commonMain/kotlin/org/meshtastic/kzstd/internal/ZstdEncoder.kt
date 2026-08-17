@@ -34,7 +34,8 @@ import org.meshtastic.kzstd.ZstdException
  *  - **Sequences:** FSE-coded, independently per LL/OF/ML stream, each stream
  *    picking the cheapest of: the dictionary's trained "Repeat" table (mode 3)
  *    when the dict has one that covers this block's codes; RLE (mode 1) when
- *    every sequence uses the same code; or the PREDEFINED table (mode 0) —
+ *    every sequence uses the same code; a fresh FSE table built from this
+ *    block's own code counts (mode 2); or the PREDEFINED table (mode 0) —
  *    always total over its symbol range, and exactly what [PureZstdDecoder] /
  *    libzstd build from the spec's default distributions. Cost is compared in
  *    bits and computed exactly ([FseEncTable.streamBitCost]), so the chosen
@@ -607,10 +608,21 @@ internal object PureZstdEncoder {
         val llCodes = IntArray(nbSeq) { codes[it].llCode }
         val ofCodes = IntArray(nbSeq) { codes[it].ofCode }
         val mlCodes = IntArray(nbSeq) { codes[it].mlCode }
-        val ll =
-            chooseSequenceTable(dict.literalLengthFse, predefinedLiteralLengthEnc, LITERAL_LENGTH_MAX_SYMBOL, llCodes)
-        val of = chooseSequenceTable(dict.offsetFse, predefinedOffsetEnc, OFFSET_MAX_SYMBOL, ofCodes)
-        val ml = chooseSequenceTable(dict.matchLengthFse, predefinedMatchLengthEnc, MATCH_LENGTH_MAX_SYMBOL, mlCodes)
+        val ll = chooseSequenceTable(
+            dict.literalLengthFse,
+            predefinedLiteralLengthEnc,
+            LITERAL_LENGTH_MAX_SYMBOL,
+            LITERAL_LENGTH_MAX_LOG,
+            llCodes,
+        )
+        val of = chooseSequenceTable(dict.offsetFse, predefinedOffsetEnc, OFFSET_MAX_SYMBOL, OFFSET_MAX_LOG, ofCodes)
+        val ml = chooseSequenceTable(
+            dict.matchLengthFse,
+            predefinedMatchLengthEnc,
+            MATCH_LENGTH_MAX_SYMBOL,
+            MATCH_LENGTH_MAX_LOG,
+            mlCodes,
+        )
         val llTable = ll.table
         val ofTable = of.table
         val mlTable = ml.table
@@ -776,6 +788,11 @@ internal object PureZstdEncoder {
      *    description bytes, and total over its declared symbol range.
      *  - **RLE (1)** -- when every sequence uses the SAME code: one description
      *    byte and not a single bit in the bitstream.
+     *  - **FSE_Compressed (2)** -- a table built from THIS block's own code
+     *    counts, plus the description a decoder needs to rebuild it. It fits
+     *    the block's actual distribution rather than the spec's guess at one,
+     *    so it wins whenever there are enough sequences to repay its
+     *    description.
      *
      * Candidates are considered in that order and a later one must be strictly
      * cheaper to win, so ties keep the mode that costs no description bytes and
@@ -785,6 +802,7 @@ internal object PureZstdEncoder {
         dictTable: FseTable?,
         predefined: FseEncTable,
         maxSymbol: Int,
+        maxLog: Int,
         codes: IntArray,
     ): SeqTableChoice {
         var best: SeqTableChoice? = null
@@ -813,6 +831,9 @@ internal object PureZstdEncoder {
                 ),
             )
         }
+
+        val fresh = buildFreshFseTable(codes, maxSymbol, maxLog)
+        if (fresh != null) consider(SeqTableChoice(fresh.encoder, 2, fresh.description))
 
         // Predefined covers every code these tables can legally carry, so the
         // fallback is unreachable in practice; it keeps the function total.

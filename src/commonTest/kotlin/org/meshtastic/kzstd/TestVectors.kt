@@ -215,6 +215,38 @@ internal object TestVectors {
         ).encodeToByteArray()
 
     /**
+     * ~7.8 KB of synthetic JSON telemetry records: realistic, genuinely
+     * compressible payload with enough sequences (hundreds) for a block's own
+     * FSE tables to repay their descriptions, and literals skewed enough for a
+     * fresh Huffman table. Generated from a fixed LCG, so it is byte-identical
+     * on every target.
+     */
+    val logRecords: ByteArray = buildRecords(60)
+
+    private fun buildRecords(count: Int): ByteArray {
+        var seed = 0x2468ACE
+        fun next(): Int {
+            seed = (seed * 1103515245 + 12345) and 0x7FFFFFFF
+            return seed ushr 8
+        }
+        val states = listOf("ok", "warn", "offline", "degraded", "recovering", "unknown")
+        val words = listOf(
+            "region", "latency", "throughput", "stable", "nominal",
+            "monitored", "link", "quick", "fox", "dog",
+        )
+        val sb = StringBuilder()
+        repeat(count) {
+            val msg = (0 until 3 + next() % 6).joinToString(" ") { words[next() % words.size] }
+            sb.append("{\"type\":\"telemetry\",\"seq\":").append(next() % 1000000)
+                .append(",\"node\":\"node-").append(next() % 64)
+                .append("\",\"state\":\"").append(states[next() % states.size])
+                .append("\",\"lat\":").append(next() % 90).append('.').append(next() % 100000)
+                .append(",\"msg\":\"").append(msg).append("\"}")
+        }
+        return sb.toString().encodeToByteArray()
+    }
+
+    /**
      * Skewed draws over ~90 byte values, with essentially no repeated
      * substrings: nearly every byte stays a literal, so the block's literals
      * exercise a wide Huffman alphabet whose counts differ by orders of

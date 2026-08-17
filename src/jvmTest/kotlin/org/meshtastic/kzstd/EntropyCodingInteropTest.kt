@@ -73,6 +73,41 @@ class EntropyCodingInteropTest {
         TestVectors.wideAlphabet,
     )
 
+    /**
+     * FSE tables built from the block's own code counts, described on the wire.
+     * The description encoding (a shrinking-width bit stream with run-length
+     * encoded gaps) has no margin for error, and libzstd rebuilding the same
+     * table from it — for all three streams at once — is the proof that it is
+     * right rather than merely symmetric with kzstd's own parser.
+     */
+    @Test
+    fun freshSequenceTablesDecodeUnderLibzstd() {
+        val data = TestVectors.logRecords
+        val frame = Zstd.compress(data)
+        assertEquals(
+            Triple(2, 2, 2),
+            FrameInspector.sequenceModes(frame),
+            "expected fresh FSE tables for LL/OF/ML",
+        )
+        assertContentEquals(data, LibZstd.decompress(frame, max))
+    }
+
+    /** Every dictionary-free encoding choice, over the whole round-trip corpus. */
+    @Test
+    fun wholeCorpusDecodesUnderLibzstd() {
+        val samples = TestVectors.corpus + listOf(
+            TestVectors.logRecords,
+            TestVectors.byteRuns,
+            TestVectors.constantBytes,
+            TestVectors.skewedAlphabet,
+            TestVectors.wideAlphabet,
+        )
+        for (sample in samples) {
+            val frame = Zstd.compress(sample)
+            assertContentEquals(sample, LibZstd.decompress(frame, max), "size=${sample.size}")
+        }
+    }
+
     @Test
     fun rleLiteralsDecodeUnderLibzstd() {
         val data = TestVectors.rleLiteralsSample
