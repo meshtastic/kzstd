@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0]
+
 Encoder-side parity work closing several gaps against the libzstd/RFC 8878
 spec — the 128 KiB single-block input limit lifted, real ratio improvements
 for both dictionary-compressed and dictionary-free frames, plus
@@ -196,7 +198,8 @@ extracted from [TAKPacket-SDK](https://github.com/meshtastic/TAKPacket-SDK).
 - The `level` parameter is currently a no-op; the encoder uses a single fixed
   greedy/lazy strategy. Frames remain libzstd-compatible regardless.
 
-[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/meshtastic/kzstd/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/meshtastic/kzstd/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/meshtastic/kzstd/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/meshtastic/kzstd/releases/tag/v0.1.0
