@@ -6,6 +6,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import com.github.luben.zstd.Zstd as LibZstd
 
@@ -166,5 +167,29 @@ class MultiBlockInteropTest {
                 .append(",\"msg\":\"").append(msg).append("\"}")
         }
         return sb.toString().encodeToByteArray().copyOf(size)
+    }
+
+    /**
+     * Lifting the single-block cap removed the only ceiling on total history
+     * size. Without a replacement, the encoder would declare a windowLog beyond
+     * libzstd's default decompression limit (`ZSTD_WINDOWLOG_LIMIT_DEFAULT` =
+     * 27, i.e. 128 MiB) for large-enough input — a frame real-world libzstd
+     * consumers reject by default (confirmed below: even a real libzstd
+     * decompressor with no explicit window-log override refuses it), breaking
+     * this codec's own libzstd-interoperability invariant. `encode()` now
+     * rejects that case up front instead of silently emitting a
+     * non-interoperable frame. 128 MiB+ is JVM-only (not commonTest) for the
+     * same reason as the rest of this file: too large to allocate on all
+     * thirteen targets.
+     */
+    @Test
+    fun inputBeyondTheDefaultWindowLogLimitIsRejected() {
+        val overLimit = (1L shl 27) + 1 // one byte past 128 MiB
+        val data = ByteArray(overLimit.toInt())
+        val error = assertFailsWith<ZstdException> { Zstd.compress(data) }
+        assertTrue(
+            error.message.orEmpty().contains("window"),
+            "expected a window-size error, got: ${error.message}",
+        )
     }
 }

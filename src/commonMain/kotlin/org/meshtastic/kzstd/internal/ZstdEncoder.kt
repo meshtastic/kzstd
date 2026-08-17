@@ -66,6 +66,17 @@ internal object PureZstdEncoder {
     // so 128 KiB is the binding half of that minimum.
     private const val MAX_BLOCK_SIZE = 1 shl 17 // 128 KiB
 
+    // libzstd's ZSTD_WINDOWLOG_LIMIT_DEFAULT: the largest windowLog a conformant
+    // decoder accepts without an explicit opt-in raise (ZSTD_d_windowLogMax).
+    // windowDescriptor() always declares a window covering the FULL history (dict
+    // + input), so total history beyond this bound would produce a frame most
+    // real-world libzstd consumers reject outright -- violating this codec's own
+    // "frames stay libzstd-interoperable in both directions" invariant. This
+    // replaces the old single-block 128 KiB input guard as the encoder's size
+    // ceiling now that multi-block encoding lifts that guard.
+    private const val MAX_WINDOW_LOG = 27
+    private const val MAX_HISTORY_SIZE = 1L shl MAX_WINDOW_LOG // 128 MiB
+
     /**
      * Encode [data] into a complete zstd frame using [dict] (parsed entropy
      * tables + content) and its [index] as match history. [level] governs
@@ -90,6 +101,13 @@ internal object PureZstdEncoder {
         level: Int = 19,
         checksum: Boolean = false,
     ): ByteArray {
+        val historySize = dict.content.size.toLong() + data.size.toLong()
+        if (historySize > MAX_HISTORY_SIZE) {
+            throw ZstdException(
+                "input ${data.size} bytes (+ ${dict.content.size} dictionary) would require a window " +
+                    "beyond libzstd's default decompression limit of 2^$MAX_WINDOW_LOG bytes",
+            )
+        }
         val depth = searchDepthFor(level)
         val out = ArrayList<Byte>(data.size + 20)
         FRAME_MAGIC.forEach { out.add(it) }
@@ -97,11 +115,19 @@ internal object PureZstdEncoder {
         // The window must span the whole frame's back-reference history, not just
         // one block's: a later block's dictionary match reaches back past every
         // block before it.
-        out.add(windowDescriptor(dict.content.size + data.size))
+        out.add(windowDescriptor(historySize.toInt()))
 
         // Per-FRAME entropy state, seeded from the dictionary and carried from
         // block to block. Held in a local: this singleton keeps no mutable state.
         val state = FrameEntropy(dict)
+
+        // Per-block match-index scratch space, allocated once and reused across
+        // every block in this call (rather than fresh per block): matching is
+        // deliberately reset per chunk (no cross-block matching, see buildSequences),
+        // so this still needs a full clear before each block, but reusing one
+        // instance avoids a fresh 128K-entry allocation (and the JVM's zero-init
+        // of it) on every one of a multi-MB input's blocks.
+        val matchHead = IntArray(HASH_SIZE)
 
         // Cut the input into Block_Maximum_Size chunks, one block each. `do/while`
         // rather than `while`, so an empty input still emits the one (empty,
@@ -109,7 +135,7 @@ internal object PureZstdEncoder {
         var start = 0
         do {
             val end = minOf(start + MAX_BLOCK_SIZE, data.size)
-            encodeBlock(out, data, start, end, lastBlock = end == data.size, dict, index, depth, state)
+            encodeBlock(out, data, start, end, lastBlock = end == data.size, dict, index, depth, state, matchHead)
             start = end
         } while (start < data.size)
 
@@ -133,8 +159,10 @@ internal object PureZstdEncoder {
      *
      * All three carry the same 3-byte header, so the smallest block is simply the
      * one with the smallest payload: 1 byte for RLE (only when every byte of the
-     * chunk is identical), the chunk length for Raw, or the compressed body. Ties
-     * go to the simpler form.
+     * chunk is identical), the chunk length for Raw, or the compressed body. RLE
+     * wins only when strictly smaller than any Compressed candidate; an
+     * equal-size Compressed block is preferred, since it's already built and
+     * decodes to the same content either way.
      *
      * [state] is the frame's running entropy state. Encoding this block moves it
      * -- sequences rotate the repeat offsets, and any table this block describes
@@ -154,9 +182,10 @@ internal object PureZstdEncoder {
         index: MatchIndex,
         depth: SearchDepth,
         state: FrameEntropy,
+        matchHead: IntArray,
     ) {
         val chunk = data.copyOfRange(start, end)
-        val program = buildSequences(chunk, dict, index, depth, priorBytes = start)
+        val program = buildSequences(chunk, dict, index, depth, priorBytes = start, head = matchHead)
         val blockState = state.copy()
         val compressedBlock = encodeCompressedBlock(program, chunk, blockState)
 
@@ -328,6 +357,7 @@ internal object PureZstdEncoder {
         index: MatchIndex,
         depth: SearchDepth,
         priorBytes: Int,
+        head: IntArray,
     ): Program {
         val dictContent = dict.content
         val dictLen = dictContent.size
@@ -340,8 +370,11 @@ internal object PureZstdEncoder {
 
         // Per-input hash chain (continues the dict's chain). head/prev index the
         // combined history. We only INSERT input positions here; dict positions
-        // live in the cached index.
-        val head = IntArray(HASH_SIZE) { -1 }
+        // live in the cached index. [head] is caller-owned scratch space reused
+        // across blocks (matching is reset per chunk regardless, see the class
+        // doc above, so it still needs a full clear -- this just avoids a fresh
+        // allocation per block).
+        head.fill(-1)
         val prev = IntArray(n) { -1 }
 
         fun hashAt(p: Int): Int {

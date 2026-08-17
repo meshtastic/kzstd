@@ -228,8 +228,9 @@ internal object TestVectors {
      * thousand) to push the literal-length and match-length Accuracy_Log to the
      * format's ceiling, and far more than 1023 literals, so this is the
      * "raw literals + a fresh FSE table on every stream" combination, with the
-     * longest table descriptions the encoder can write. Sized to stay under the
-     * 128 KiB single-block limit.
+     * longest table descriptions the encoder can write. Sized to stay within one
+     * 128 KiB block (Block_Maximum_Size), so the case is exercised without also
+     * spanning a multi-block chain.
      */
     val largeLogRecords: ByteArray = buildRecords(400)
 
