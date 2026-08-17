@@ -12,8 +12,11 @@ import org.meshtastic.kzstd.ZstdException
  * frames exercise — and, defensively, the full block/literals/sequences grammar
  * so it stays correct for any conformant small frame:
  *
- *  - Frame header with optional content-size / dictionary-id / checksum (all
- *    OFF in our frames, but parsed if present).
+ *  - Frame header with optional content-size / dictionary-id / checksum
+ *    (content-size and dictionary-id are OFF in our own frames but parsed —
+ *    and, for dictionary-id, validated against the supplied dictionary — if
+ *    present; checksum, when present in ANY frame including real libzstd's,
+ *    is validated against the decoded content — see [decode]).
  *  - Block loop: Raw, RLE, and Compressed blocks; the Last_Block flag.
  *  - Literals section: Raw, RLE, Compressed (fresh Huffman), and Treeless
  *    (repeat the dictionary's / previous block's Huffman table); 1-stream and
@@ -53,8 +56,8 @@ internal object PureZstdDecoder {
         val magic = reader.readLEInt(4)
         if (magic != FRAME_MAGIC) throw ZstdException("bad frame magic ${magic.toString(16)}")
 
-        val frameDictId = parseFrameHeader(reader) // window/content-size/dict-id/checksum descriptors
-        checkDictionaryId(frameDictId, dict.dictionaryId)
+        val frameHeader = parseFrameHeader(reader) // window/content-size/dict-id/checksum descriptors
+        checkDictionaryId(frameHeader.dictionaryId, dict.dictionaryId)
 
         // Output buffer prefixed (conceptually) by the dictionary content: a
         // match offset that reaches before the frame start indexes into the
@@ -98,7 +101,28 @@ internal object PureZstdDecoder {
             if (lastBlock) break
         }
 
-        return out.frameOutput()
+        val output = out.frameOutput()
+
+        // RFC 8878 §3.1.1: when Content_Checksum_Flag is set, a trailing 4-byte
+        // little-endian field holds the low 32 bits of XXH64(seed=0) over the
+        // FULL decoded content. Validate it here against ANY conformant frame
+        // (not just kzstd's own — real libzstd sets this by default), so
+        // corrupted content is caught rather than silently returned.
+        if (frameHeader.contentChecksumFlag) validateContentChecksum(reader, output)
+
+        return output
+    }
+
+    /** Reads the trailing 4-byte checksum and throws if it doesn't match [output]. */
+    private fun validateContentChecksum(reader: ForwardByteReader, output: ByteArray) {
+        val storedChecksum = reader.readLEInt(4)
+        val computedChecksum = (Xxh64.hash(output) and 0xFFFFFFFFL).toInt()
+        if (storedChecksum != computedChecksum) {
+            throw ZstdException(
+                "content checksum mismatch: frame has ${storedChecksum.toUInt()}, " +
+                    "computed ${computedChecksum.toUInt()}",
+            )
+        }
     }
 
     /**
@@ -120,11 +144,20 @@ internal object PureZstdDecoder {
     // ── Frame header ─────────────────────────────────────────────────────────
 
     /**
-     * Parses the frame header and returns its declared Dictionary_ID, or `0` if
-     * the field is absent (Dictionary_ID_Flag == 0) -- `0` also doubles as RFC
-     * 8878's own "no Dictionary_ID" sentinel, so callers can treat it uniformly.
+     * The fields [parseFrameHeader] extracts that later decode steps need. A
+     * struct rather than separate return values so a future field (e.g. an
+     * eventual Frame_Content_Size check) doesn't force every caller and every
+     * other in-flight header field to renegotiate a shared return type again.
      */
-    private fun parseFrameHeader(reader: ForwardByteReader): Int {
+    private class FrameHeader(
+        /** Declared Dictionary_ID, or `0` if absent (Dictionary_ID_Flag == 0) --
+         *  `0` also doubles as RFC 8878's own "no Dictionary_ID" sentinel. */
+        val dictionaryId: Int,
+        /** Whether Content_Checksum_Flag is set. */
+        val contentChecksumFlag: Boolean,
+    )
+
+    private fun parseFrameHeader(reader: ForwardByteReader): FrameHeader {
         val descriptor = reader.readByte()
         val frameContentSizeFlag = (descriptor ushr 6) and 0x3
         val singleSegment = (descriptor ushr 5) and 0x1
@@ -155,12 +188,11 @@ internal object PureZstdDecoder {
         }
         if (fcsBytes > 0) reader.readLELong(fcsBytes)
 
-        // Content checksum (if any) is a trailing 4-byte field consumed by the
-        // block loop's end; our frames set it OFF. Record nothing here.
-        @Suppress("UNUSED_EXPRESSION")
-        contentChecksum
-
-        return frameDictId
+        // Content checksum (if any) is a trailing 4-byte field AFTER the block
+        // loop's end; the caller reads and validates it once the full content
+        // is decoded (a running hash can't be computed until then anyway,
+        // since blocks may repeat-copy from bytes not yet finalised as output).
+        return FrameHeader(dictionaryId = frameDictId, contentChecksumFlag = contentChecksum == 1)
     }
 
     // ── Compressed block ───────────────────────────────────────────────────────

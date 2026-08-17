@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package org.meshtastic.kzstd
 
+import com.github.luben.zstd.ZstdCompressCtx
 import com.github.luben.zstd.ZstdDictCompress
 import com.github.luben.zstd.ZstdDictDecompress
 import kotlin.test.Test
@@ -138,6 +139,32 @@ class KzstdLibzstdInteropTest {
         var id = 0
         for (i in 0 until dictIdBytes) id = id or ((frame[p + i].toInt() and 0xFF) shl (8 * i))
         return id
+    }
+
+    @Test
+    fun kzstdValidatesLibzstdContentChecksum() {
+        // The zstd CLI/library enables Content_Checksum by default; kzstd's own
+        // encoder never has (Content_Checksum_Flag stays off in all of the
+        // above), so this is the only place the decode-side XXH64 validation
+        // (RFC 8878 §3.1.1) against a REAL checksum gets exercised.
+        for (sample in TestVectors.corpus) {
+            val frame = ZstdCompressCtx().use { it.setChecksum(true).compress(sample) }
+            val back = Zstd.decompress(frame, max)
+            assertContentEquals(sample, back, "libzstd(checksum)->kzstd, size=${sample.size}")
+        }
+    }
+
+    @Test
+    fun kzstdRejectsCorruptedChecksummedFrame() {
+        val sample = TestVectors.corpus.first { it.isNotEmpty() }
+        val frame = ZstdCompressCtx().use { it.setChecksum(true).compress(sample) }
+        // Flip a bit in the trailing 4-byte XXH64 checksum field itself, so the
+        // frame still parses (magic/header/blocks untouched) but the checksum
+        // no longer matches the (still-correctly-decoded) content.
+        val corrupted = frame.copyOf()
+        corrupted[corrupted.size - 1] = (corrupted[corrupted.size - 1].toInt() xor 0x01).toByte()
+        val ex = assertFailsWith<ZstdException> { Zstd.decompress(corrupted, max) }
+        assertTrue(ex.message!!.contains("checksum"), "expected a checksum-mismatch message, got: ${ex.message}")
     }
 
     /** Literals_Block_Type of the first block (RFC 8878), or -1 if not a Compressed block. */

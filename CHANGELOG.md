@@ -10,6 +10,15 @@ Encoder-side parity work closing several gaps against the libzstd/RFC 8878
 spec — real ratio improvements for dictionary-compressed frames, no wire
 format or public-API changes.
 
+### Fixed
+
+- The decoder now validates a frame's Content_Checksum when
+  `Content_Checksum_Flag` is set: it reads the trailing 4-byte XXH64
+  checksum and throws `ZstdException` on a mismatch against the decoded
+  content, for ANY conformant frame — not just kzstd's own — so a real
+  `libzstd`-produced frame (checksums are on by default in the `zstd` CLI)
+  is no longer accepted with silently-corrupted content.
+
 ### Changed
 
 - The encoder now emits repeat-offset sequence codes when a match's distance
