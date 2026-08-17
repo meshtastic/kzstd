@@ -107,6 +107,20 @@ internal class FseTable(
             return FseTable(tableLog, symbolTable, nbBitsTable, newStateTable)
         }
 
+        /**
+         * The degenerate one-symbol table used by Symbol_Compression_Mode 1
+         * (RLE): [symbol] has probability 1, so decoding stays in state 0
+         * forever and consumes no bits. Shared by the decoder (which reads the
+         * mode-1 description byte) and the encoder (which emits it when a
+         * stream's every code is the same).
+         */
+        fun rle(symbol: Int): FseTable = FseTable(
+            tableLog = 0,
+            symbol = intArrayOf(symbol),
+            nbBits = intArrayOf(0),
+            newState = intArrayOf(0),
+        )
+
         /** Floor(log2(v)) for v >= 1. */
         private fun highBit(v: Int): Int {
             var n = 0

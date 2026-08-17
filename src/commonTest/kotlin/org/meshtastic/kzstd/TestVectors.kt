@@ -172,6 +172,48 @@ internal object TestVectors {
         "28b52ffd230d92503b9435010063010399c65a69e84756accc8c4a8508fc8f87036d206e18b8ca544a6861d98e86a8f857ef0d",
     )
 
+    /**
+     * One byte value, repeated: the RLE_Block (Block_Type 1) case — the whole
+     * block collapses to a single stored byte.
+     */
+    val constantBytes: ByteArray = ByteArray(1500) { 'Q'.code.toByte() }
+
+    /**
+     * Twenty-six eight-byte single-letter runs. Every run compresses to the SAME
+     * sequence — one literal, a 7-byte match at distance 1 (which is the initial
+     * repeat-offset slot, so its offset code is 0) — so each of the three
+     * LL/OF/ML symbol streams is a single repeated code (RLE, mode 1) and none
+     * of those codes carries extra bits: the sequence bitstream ends up holding
+     * nothing but its stop bit.
+     */
+    val byteRuns: ByteArray = buildString {
+        for (c in 'a'..'z') append(c.toString().repeat(8))
+    }.encodeToByteArray()
+
+    /**
+     * A RAW-content dictionary (no trained-dict magic ⇒ content only, no entropy
+     * tables), used with [rleLiteralsSample] to reach RLE literals: every phrase
+     * of the sample is a match into this content, leaving only the separator
+     * bytes as literals.
+     */
+    val rawContentDict: ByteArray =
+        "the quick brown fox jumps over the lazy dog while nominal reports stream steadily"
+            .encodeToByteArray()
+
+    /**
+     * Phrases from [rawContentDict] separated by a single repeated byte. Each
+     * phrase becomes a dictionary match and each separator a one-byte literal
+     * run, so the block's whole literals buffer is one byte value repeated —
+     * RLE literals (Literals_Block_Type 1) — while the block itself is far from
+     * constant.
+     */
+    val rleLiteralsSample: ByteArray = (
+        "A" + "the quick brown fox " +
+            "A" + "jumps over the lazy " +
+            "A" + "dog while nominal " +
+            "A" + "reports stream steadily"
+        ).encodeToByteArray()
+
     /** The exact plaintext [treelessDictFrame] must decode to (verified by DictEntropyDecodeTest). */
     val treelessDictPlaintext: ByteArray = hexToBytes(
         "7b2274797065223a22686561727462656174222c22736571223a3634383838362c226e6f6465223a226e6f64652d3233222c227374617465223a226f6b222c226c6174223a2d36382e32303131302c226c6f6e223a2d32352e36383235352c226d7367223a22726567696f6e20616e64206e6f6d696e616c206e6f6d696e616c206d6f6e69746f7265642074686520746865227d",

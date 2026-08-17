@@ -517,7 +517,7 @@ internal object PureZstdDecoder {
             1 -> {
                 // RLE: a single byte is the only symbol (probability 1.0), tableLog 0.
                 val symbol = reader.readByte()
-                rleTable(symbol)
+                FseTable.rle(symbol)
             }
 
             2 -> parseFseTable(reader, kind.maxLog, kind.maxSymbol)
@@ -525,17 +525,6 @@ internal object PureZstdDecoder {
             else -> kind.repeat(state)
                 ?: throw ZstdException("repeat mode for ${kind.name} but no prior/dict table")
         }
-
-    private fun rleTable(symbol: Int): FseTable {
-        // One-state table: always emits `symbol`, consumes 0 bits, stays in
-        // state 0.
-        return FseTable(
-            tableLog = 0,
-            symbol = intArrayOf(symbol),
-            nbBits = intArrayOf(0),
-            newState = intArrayOf(0),
-        )
-    }
 
     /**
      * Apply zstd's repeat-offset machinery (RFC 8878 §3.1.1.3.2.1.1). Offset

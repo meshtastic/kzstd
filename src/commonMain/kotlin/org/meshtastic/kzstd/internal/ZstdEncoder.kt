@@ -18,28 +18,27 @@ import org.meshtastic.kzstd.ZstdException
  *  - **Frame header:** single-segment, dictID OFF, contentSize OFF, checksum
  *    OFF — byte-for-byte the descriptor the SDK's decoder (and libzstd) accept,
  *    with a window large enough to cover `dict.content + input`.
- *  - **One Compressed_Block** with Last_Block set. If the compressed block would
- *    not be smaller than the input, a Raw_Block is emitted instead (a valid
- *    fallback; the SDK's own `0xFF` skip-compress also covers incompressible
- *    payloads above this layer).
+ *  - **One block** with Last_Block set, of whichever type is smallest: a
+ *    Compressed_Block, an RLE_Block when every input byte is identical, or a
+ *    Raw_Block when compression does not pay (a valid fallback; the SDK's own
+ *    `0xFF` skip-compress also covers incompressible payloads above this
+ *    layer).
  *  - **Matching:** a 4-byte hash-chain matcher over `[dict.content ++ input]`, so
  *    matches can back-reference the dictionary content. The dict index is built
  *    once per `ZstdDictionary` instance, so the dict content is hashed once and
  *    reused across calls. Lazy (1-step lookahead) matching for a better ratio.
- *  - **Literals:** reuses the dictionary's trained Huffman table (Treeless,
- *    litType 3, single-stream only) when it covers every literal byte in this
- *    block AND the encoded form is smaller than Raw; otherwise a RAW literals
- *    block (litType 0) — simplest valid option and a good fit because a
- *    trained dict turns most bytes into matches, leaving few literals to
- *    begin with.
- *  - **Sequences:** FSE-coded, independently per LL/OF/ML stream. Each stream
- *    reuses the dictionary's trained "Repeat" table (mode 3) when the dict
- *    has one and it assigns nonzero probability to every code this block's
- *    sequences actually need; otherwise it falls back to the PREDEFINED table
- *    (mode 0) — always total over its symbol range, and exactly what
- *    [PureZstdDecoder] / libzstd build from the spec's default distributions.
- *    This encoder never emits RLE or a fresh FSE_Compressed table for
- *    sequences.
+ *  - **Literals:** RLE (litType 1) when every literal is the same byte, the
+ *    dictionary's trained Huffman table (Treeless, litType 3, single-stream
+ *    only) when it covers every literal byte in this block, or RAW (litType 0)
+ *    — whichever is smallest.
+ *  - **Sequences:** FSE-coded, independently per LL/OF/ML stream, each stream
+ *    picking the cheapest of: the dictionary's trained "Repeat" table (mode 3)
+ *    when the dict has one that covers this block's codes; RLE (mode 1) when
+ *    every sequence uses the same code; or the PREDEFINED table (mode 0) —
+ *    always total over its symbol range, and exactly what [PureZstdDecoder] /
+ *    libzstd build from the spec's default distributions. Cost is compared in
+ *    bits and computed exactly ([FseEncTable.streamBitCost]), so the chosen
+ *    mode is genuinely the smallest.
  *  - **Offsets:** a repeat-offset code (1..3) when the match distance equals
  *    one of the three most-recently-used offsets (rotated exactly as
  *    [PureZstdDecoder]'s `applyOffset` does), else an explicit literal offset
@@ -105,14 +104,31 @@ internal object PureZstdEncoder {
         out.add(frameHeaderDescriptor(checksum))
         out.add(windowDescriptor(dict.content.size + data.size))
 
-        if (compressedBlock != null && compressedBlock.size < data.size) {
-            // Block_Header (3 bytes LE): last=1, type=2 (Compressed), size=blockSize
-            writeBlockHeader(out, lastBlock = true, blockType = 2, blockSize = compressedBlock.size)
-            compressedBlock.forEach { out.add(it) }
-        } else {
-            // Raw_Block fallback: the literal bytes are the block.
-            writeBlockHeader(out, lastBlock = true, blockType = 0, blockSize = data.size)
-            data.forEach { out.add(it) }
+        // All three block types carry the same 3-byte header, so the smallest
+        // block is simply the one with the smallest payload: 1 byte for RLE
+        // (only when every input byte is identical), `data.size` for Raw, or
+        // the compressed body. Ties go to the simpler form.
+        val constantByte = constantByteOrNull(data)
+        when {
+            constantByte != null &&
+                data.size > 1 &&
+                (compressedBlock == null || compressedBlock.size > 1) -> {
+                // RLE_Block: the single repeated byte IS the block body.
+                writeBlockHeader(out, lastBlock = true, blockType = 1, blockSize = data.size)
+                out.add(constantByte)
+            }
+
+            compressedBlock != null && compressedBlock.size < data.size -> {
+                // Block_Header (3 bytes LE): last=1, type=2 (Compressed), size=blockSize
+                writeBlockHeader(out, lastBlock = true, blockType = 2, blockSize = compressedBlock.size)
+                compressedBlock.forEach { out.add(it) }
+            }
+
+            else -> {
+                // Raw_Block fallback: the literal bytes are the block.
+                writeBlockHeader(out, lastBlock = true, blockType = 0, blockSize = data.size)
+                data.forEach { out.add(it) }
+            }
         }
 
         if (checksum) {
@@ -124,6 +140,14 @@ internal object PureZstdEncoder {
         }
 
         return ByteArray(out.size) { out[it] }
+    }
+
+    /** The byte every element of [bytes] equals, or null (including when empty). */
+    private fun constantByteOrNull(bytes: ByteArray): Byte? {
+        if (bytes.isEmpty()) return null
+        val first = bytes[0]
+        for (b in bytes) if (b != first) return null
+        return first
     }
 
     // ── Frame header ───────────────────────────────────────────────────────────
@@ -394,6 +418,19 @@ internal object PureZstdEncoder {
      * this comparison is mandatory, not a hint.
      */
     private fun writeLiteralsSection(out: ArrayList<Byte>, literals: ByteArray, dict: ParsedDictionary) {
+        val rawCost = rawLiteralsHeaderLen(literals.size) + literals.size
+
+        // RLE literals (litType 1): one stored byte regenerates the whole run.
+        // Reachable whenever every literal is the same byte -- with a dictionary
+        // that happens for real inputs whose only literals are a repeated
+        // separator, every other byte having been matched into the dict.
+        val constant = constantByteOrNull(literals)
+        if (constant != null && rawLiteralsHeaderLen(literals.size) + 1 < rawCost) {
+            writeRawOrRleLiteralsHeader(out, literals.size, litType = 1)
+            out.add(constant)
+            return
+        }
+
         val huffman = dict.literalsHuffman
         if (huffman != null && literals.isNotEmpty() && literals.size <= MAX_TREELESS_LITERALS) {
             val encTable = HuffmanEncTable.fromDecodeTable(huffman)
@@ -454,25 +491,33 @@ internal object PureZstdEncoder {
         out.add(b2.toByte())
     }
 
-    private fun writeRawLiteralsHeader(out: ArrayList<Byte>, size: Int) {
-        // litType=0 (Raw). size_format selects the Regenerated_Size width:
-        //  - size <  32      : 1-byte header, 5-bit size  (size_format bit0 = 0)
-        //  - size <  4096    : 2-byte header, 12-bit size (size_format = 0b01)
-        //  - else            : 3-byte header, 20-bit size (size_format = 0b11)
+    private fun writeRawLiteralsHeader(out: ArrayList<Byte>, size: Int) =
+        writeRawOrRleLiteralsHeader(out, size, litType = 0)
+
+    /**
+     * Literals_Section_Header for the two uncoded forms, litType=0 (Raw) and
+     * litType=1 (RLE) -- they share one header layout, differing only in
+     * whether `Regenerated_Size` bytes or a single byte follow. size_format
+     * selects the Regenerated_Size width:
+     *  - size <  32      : 1-byte header, 5-bit size  (size_format bit0 = 0)
+     *  - size <  4096    : 2-byte header, 12-bit size (size_format = 0b01)
+     *  - else            : 3-byte header, 20-bit size (size_format = 0b11)
+     */
+    private fun writeRawOrRleLiteralsHeader(out: ArrayList<Byte>, size: Int, litType: Int) {
         when {
             size < 32 -> {
-                out.add(((size shl 3) or (0 shl 2) or 0).toByte()) // [size:5][00][00]
+                out.add(((size shl 3) or (0 shl 2) or litType).toByte()) // [size:5][00][type:2]
             }
 
             size < 4096 -> {
-                val b0 = (0) or (0b01 shl 2) or ((size and 0xF) shl 4)
+                val b0 = litType or (0b01 shl 2) or ((size and 0xF) shl 4)
                 val b1 = (size ushr 4) and 0xFF
                 out.add(b0.toByte())
                 out.add(b1.toByte())
             }
 
             else -> {
-                val b0 = (0) or (0b11 shl 2) or ((size and 0xF) shl 4)
+                val b0 = litType or (0b11 shl 2) or ((size and 0xF) shl 4)
                 val b1 = (size ushr 4) and 0xFF
                 val b2 = (size ushr 12) and 0xFF
                 out.add(b0.toByte())
@@ -517,23 +562,27 @@ internal object PureZstdEncoder {
         val codes = Array(nbSeq) { computeCodes(sequences[it], rep) }
 
         // Symbol_Compression_Modes: 2 bits each for LL, OF, ML (high bits
-        // first), low 2 bits reserved (0). Each stream independently uses the
-        // dictionary's trained "Repeat" table (mode 3) when the dict has one
-        // AND it assigns nonzero probability to every code this block's
-        // sequences actually need -- otherwise Predefined (mode 0), which is
-        // always total over its whole symbol range. This encoder never emits
-        // RLE (1) or a fresh FSE_Compressed table (2) for sequences.
-        val (llTable, llMode) =
-            resolveSequenceTable(dict.literalLengthFse, LITERAL_LENGTH_MAX_SYMBOL, predefinedLiteralLengthEnc, nbSeq) {
-                codes[it].llCode
-            }
-        val (ofTable, ofMode) =
-            resolveSequenceTable(dict.offsetFse, OFFSET_MAX_SYMBOL, predefinedOffsetEnc, nbSeq) { codes[it].ofCode }
-        val (mlTable, mlMode) =
-            resolveSequenceTable(dict.matchLengthFse, MATCH_LENGTH_MAX_SYMBOL, predefinedMatchLengthEnc, nbSeq) {
-                codes[it].mlCode
-            }
-        out.add(((llMode shl 6) or (ofMode shl 4) or (mlMode shl 2)).toByte())
+        // first), low 2 bits reserved (0). Each stream picks its own cheapest
+        // valid table (see [chooseSequenceTable]).
+        val llCodes = IntArray(nbSeq) { codes[it].llCode }
+        val ofCodes = IntArray(nbSeq) { codes[it].ofCode }
+        val mlCodes = IntArray(nbSeq) { codes[it].mlCode }
+        val ll =
+            chooseSequenceTable(dict.literalLengthFse, predefinedLiteralLengthEnc, LITERAL_LENGTH_MAX_SYMBOL, llCodes)
+        val of = chooseSequenceTable(dict.offsetFse, predefinedOffsetEnc, OFFSET_MAX_SYMBOL, ofCodes)
+        val ml = chooseSequenceTable(dict.matchLengthFse, predefinedMatchLengthEnc, MATCH_LENGTH_MAX_SYMBOL, mlCodes)
+        val llTable = ll.table
+        val ofTable = of.table
+        val mlTable = ml.table
+        out.add(((ll.mode shl 6) or (of.mode shl 4) or (ml.mode shl 2)).toByte())
+
+        // Any table DESCRIPTIONS (an RLE symbol byte, or a full FSE table
+        // header) follow the mode byte in stream order LL, OF, ML -- the order
+        // [PureZstdDecoder.decodeSequences] resolves them in, which is NOT the
+        // LL/ML/OF order the bitstream's extra bits use below.
+        ll.description.forEach { out.add(it) }
+        of.description.forEach { out.add(it) }
+        ml.description.forEach { out.add(it) }
 
         val bw = ReverseBitWriter()
 
@@ -669,33 +718,65 @@ internal object PureZstdEncoder {
     }
 
     /**
-     * Choose the FSE encode table (and its 2-bit Symbol_Compression_Mode) for
-     * one sequence symbol stream: the dictionary's trained table (Repeat,
-     * mode 3) if [dictTable] is non-null AND covers every code in
-     * `0 until nbSeq` via [codeAt] (checked via [FseEncTable.isCovered] before
-     * committing -- a dict's training corpus commonly never produced some
-     * symbol, leaving it zero-probability), else [predefined] (Predefined,
-     * mode 0), which is always total over its declared symbol range.
+     * One stream's chosen FSE encode table, its 2-bit Symbol_Compression_Mode,
+     * and the table description bytes (if any) that must follow the mode byte.
      */
-    private inline fun resolveSequenceTable(
+    private class SeqTableChoice(val table: FseEncTable, val mode: Int, val description: ByteArray)
+
+    /**
+     * Choose the cheapest valid table for one sequence symbol stream, costed in
+     * BITS ([FseEncTable.streamBitCost] is exact, not an entropy estimate) plus
+     * 8 bits per description byte:
+     *
+     *  - **Repeat (3)** -- the dictionary's trained table, when it exists and
+     *    assigns nonzero probability to every code this block needs (a dict's
+     *    training corpus commonly never produced some symbol). Costs no
+     *    description bytes.
+     *  - **Predefined (0)** -- the spec's default distribution; also free of
+     *    description bytes, and total over its declared symbol range.
+     *  - **RLE (1)** -- when every sequence uses the SAME code: one description
+     *    byte and not a single bit in the bitstream.
+     *
+     * Candidates are considered in that order and a later one must be strictly
+     * cheaper to win, so ties keep the mode that costs no description bytes and
+     * leaves the dictionary paths in place.
+     */
+    private fun chooseSequenceTable(
         dictTable: FseTable?,
-        maxSymbol: Int,
         predefined: FseEncTable,
-        nbSeq: Int,
-        codeAt: (Int) -> Int,
-    ): Pair<FseEncTable, Int> {
-        if (dictTable != null) {
-            val candidate = FseEncTable.fromDecodeTable(dictTable, maxSymbol)
-            var covered = true
-            for (i in 0 until nbSeq) {
-                if (!candidate.isCovered(codeAt(i))) {
-                    covered = false
-                    break
-                }
+        maxSymbol: Int,
+        codes: IntArray,
+    ): SeqTableChoice {
+        var best: SeqTableChoice? = null
+        var bestBits = Long.MAX_VALUE
+
+        fun consider(candidate: SeqTableChoice) {
+            val bits = candidate.table.streamBitCost(codes) ?: return
+            val total = bits + candidate.description.size * 8L
+            if (total < bestBits) {
+                bestBits = total
+                best = candidate
             }
-            if (covered) return candidate to 3
         }
-        return predefined to 0
+
+        if (dictTable != null) {
+            consider(SeqTableChoice(FseEncTable.fromDecodeTable(dictTable, maxSymbol), 3, ByteArray(0)))
+        }
+        consider(SeqTableChoice(predefined, 0, ByteArray(0)))
+        val constantCode = codes[0].takeIf { first -> codes.all { it == first } }
+        if (constantCode != null) {
+            consider(
+                SeqTableChoice(
+                    FseEncTable.fromDecodeTable(FseTable.rle(constantCode), maxSymbol),
+                    1,
+                    byteArrayOf(constantCode.toByte()),
+                ),
+            )
+        }
+
+        // Predefined covers every code these tables can legally carry, so the
+        // fallback is unreachable in practice; it keeps the function total.
+        return best ?: SeqTableChoice(predefined, 0, ByteArray(0))
     }
 
     /** Map a literal length to its FSE code (largest baseline <= length). */
