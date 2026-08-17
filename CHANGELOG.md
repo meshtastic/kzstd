@@ -30,13 +30,18 @@ public-API changes, except where noted below.
   true, the encoder sets `Content_Checksum_Flag` and appends the XXH64
   checksum of the input. Defaults to false, so every existing call site's
   frame bytes are unchanged.
-- `Zstd.compress` now accepts input up to 128 MiB. It cuts the input into
-  128 KiB (`Block_Maximum_Size`) chunks and emits them as one multi-block
-  frame, `Last_Block` set on the final block only; anything larger than
-  128 KiB used to be rejected with a `ZstdException`. `Zstd.decompress` has
-  always read multi-block frames from any encoder, and real libzstd reads
-  these. 3 MB of synthetic JSON telemetry compresses to 556,657 bytes across
-  24 blocks — between libzstd's level 3 (579,374) and level 19 (362,967).
+- `Zstd.compress` now accepts input up to 128 MiB (dictionary content + data
+  combined), up from 128 KiB. It cuts the input into 128 KiB
+  (`Block_Maximum_Size`) chunks and emits them as one multi-block frame,
+  `Last_Block` set on the final block only; anything larger than 128 KiB used
+  to be rejected with a `ZstdException`. The new 128 MiB ceiling replaces that
+  guard: beyond it, the frame's required window would exceed libzstd's default
+  decompression limit (`ZSTD_WINDOWLOG_LIMIT_DEFAULT`), so it's still rejected
+  rather than emitting a frame most real-world libzstd consumers would refuse.
+  `Zstd.decompress` has always read multi-block frames from any encoder, and
+  real libzstd reads these. 3 MB of synthetic JSON telemetry compresses to
+  556,657 bytes across 24 blocks — between libzstd's level 3 (579,374) and
+  level 19 (362,967).
 
 ### Changed
 

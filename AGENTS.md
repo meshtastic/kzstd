@@ -44,6 +44,14 @@ would be over-engineering here.
   `FrameEntropy` must keep mirroring `PureZstdDecoder`'s `DecodeState` exactly, or
   a mode names one table on each side and the frame decodes to garbage that only
   a real-libzstd oracle catches.
+- **Total history (dictionary content + input) is capped at 128 MiB.** The
+  frame header always declares a window covering the full history; beyond
+  128 MiB that window exceeds libzstd's default decompression limit
+  (`ZSTD_WINDOWLOG_LIMIT_DEFAULT` = windowLog 27), so `encode()` rejects it
+  with a `ZstdException` up front rather than emit a frame most real-world
+  libzstd consumers refuse. Keep this guard — it's what "frames stay
+  libzstd-interoperable in both directions" actually requires now that
+  multi-block encoding has no other size limit.
 - **No shared mutable state, no lock.** A `ZstdDictionary` digests its dictionary
   once in its constructor and is immutable thereafter; the engine objects keep all
   per-call state in locals. Do not reintroduce global caches. The encoder's

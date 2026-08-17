@@ -67,13 +67,18 @@ val back = Zstd.decompress(small, dict, maxSize = 64 * 1024)
   level does search more candidate matches per position, which can shrink output
   at the cost of more work. Frames remain fully libzstd-compatible at every level.
 - **Blocks are compressed independently (no cross-block matching).** `Zstd.compress`
-  takes an input of any size, cutting it into zstd's 128 KiB `Block_Maximum_Size`
-  chunks and emitting one multi-block frame. Each chunk is matched only against
-  itself and the dictionary, never against an earlier block's output, so a large
-  input compresses less well than a windowed encoder manages — 3 MB of synthetic
+  cuts input into zstd's 128 KiB `Block_Maximum_Size` chunks and emits one
+  multi-block frame. Each chunk is matched only against itself and the
+  dictionary, never against an earlier block's output, so a large input
+  compresses less well than a windowed encoder manages — 3 MB of synthetic
   JSON telemetry lands between libzstd's levels 3 and 19. Entropy tables and the
   repeat offsets ARE carried across blocks. A windowed matcher is a planned
   improvement.
+- **Total input (dictionary content + data) is capped at 128 MiB.** Beyond that,
+  the window a frame must declare exceeds libzstd's default decompression limit
+  (`ZSTD_WINDOWLOG_LIMIT_DEFAULT`), so `Zstd.compress` throws `ZstdException`
+  rather than emit a frame most real-world libzstd consumers would refuse to
+  decode.
 - **Huffman-coded literals are single-stream and directly described.** The encoder
   builds a Huffman table from a block's own literals, but writes only the
   single-stream layout (so it applies to at most 1023 bytes of literals per block)
