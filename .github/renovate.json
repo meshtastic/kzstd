@@ -1,26 +1,5 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    ":dependencyDashboard",
-    ":semanticCommitTypeAll(chore)",
-    "group:recommended"
-  ],
-  "commitMessageTopic": "{{depName}}",
-  "labels": ["dependencies"],
-  "vulnerabilityAlerts": {
-    "enabled": true
-  },
-  "packageRules": [
-    {
-      "description": "Automerge non-major dependency updates",
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "automerge": true
-    },
-    {
-      "description": "Disable automerge for major updates",
-      "matchUpdateTypes": ["major"],
-      "automerge": false
-    }
-  ]
+  "description": "Org-wide policy for published KMP libraries — automerge baseline, 3-day soak, kotlin-toolchain and first-party holds. See meshtastic/.github:kmp-library.json for the rules and their rationale. kzstd needs no local overrides.",
+  "extends": ["local>meshtastic/.github:kmp-library"]
 }
