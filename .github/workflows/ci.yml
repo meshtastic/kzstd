@@ -57,9 +57,12 @@ jobs:
 
   build:
     name: Build, test & API check (all KMP targets)
-    # macOS is required to compile the Apple/native klibs (iOS, macOS, tvOS) — the
-    # whole value of kzstd is its multiplatform reach, so CI compiles every target,
-    # not just the JVM one.
+    # macOS is required to *execute* the Apple test binaries (iOS, macOS, tvOS).
+    # Compiling their klibs is not the reason: Kotlin/Native cross-compiles those
+    # from Linux (verified on 2.4.10 — `compileKotlinIosArm64` and a full
+    # `publishToMavenLocal` both succeed there, emitting the same 14 artifacts
+    # Maven Central holds). This job is therefore the release gate for the Apple
+    # targets, and release.yml requires it to be green before publishing.
     runs-on: macos-latest
     steps:
       - name: Checkout
