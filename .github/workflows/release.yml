@@ -13,11 +13,20 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  # the "Require green CI" step reads check-runs for the commit being released
+  checks: read
 
 jobs:
   release:
     name: Test, build & publish to Maven Central
-    runs-on: macos-latest
+    # Linux publishes every target. Kotlin/Native cross-compiles the Apple klibs
+    # (iOS, macOS, tvOS) from any host since 2.1, so a macOS runner buys nothing
+    # here — kzstd assembles no XCFramework and has no cinterop, so there is
+    # nothing left that needs Xcode. Verified against 0.2.0: a Linux publish
+    # produces the same 14 artifacts Maven Central holds, Apple klibs included.
+    # What a Linux host cannot do is *execute* the Apple test binaries; the
+    # "Require green CI" step below is what keeps that guarantee.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,7 +56,47 @@ jobs:
         with:
           develocity-access-key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
 
+      - name: Cache Konan (Kotlin/Native toolchain)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            konan-${{ runner.os }}-
+
+      # CI does not run on tags, and workflow_dispatch can release any ref — so the
+      # Apple *tests* (macOS-only, and the one thing this runner cannot do) are only
+      # guaranteed if the commit being released already passed them on a branch.
+      - name: Require green CI on the commit being released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          JOB="Build, test & API check (all KMP targets)"
+          for _ in $(seq 1 60); do
+            # -f filters server-side: the unfiltered check-runs list is paginated,
+            # so a client-side match can miss the job entirely and wait forever.
+            if ! CONC=$(gh api -X GET \
+              "repos/${{ github.repository }}/commits/$SHA/check-runs" \
+              -f check_name="$JOB" --jq '.check_runs[0].conclusion // ""'); then
+              echo "::warning::check-runs query failed; retrying"
+              sleep 30
+              continue
+            fi
+            case "$CONC" in
+              success) echo "✓ $JOB passed on $SHA"; exit 0 ;;
+              "") echo "waiting for '$JOB' on $SHA…"; sleep 30 ;;
+              *) echo "::error::'$JOB' concluded '$CONC' on $SHA — not releasing"; exit 1 ;;
+            esac
+          done
+          echo "::error::timed out waiting for '$JOB' on $SHA"
+          exit 1
+
       - name: Build, test & API check (all targets)
+        # On Linux this compiles every target and runs every test that can execute
+        # here (JVM/JS/Wasm/linuxX64). The Apple test binaries are covered by the
+        # CI guard above.
         run: ./gradlew build --stacktrace
 
       - name: Resolve tag state on origin
