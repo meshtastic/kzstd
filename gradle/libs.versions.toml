@@ -5,7 +5,7 @@ kotlin = "2.4.10"
 # that kzstd decodes real libzstd frames): the both-directions interop gate.
 zstd-jni = "1.5.7-16"
 dokka = "2.2.0"
-binary-compat = "0.18.1"
+binary-compat = "0.18.2"
 kover = "0.9.9"
 vanniktech-publish = "0.37.0"
 junit-jupiter = "6.1.3"
