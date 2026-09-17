@@ -60,14 +60,37 @@ and `explicitApi()`. After an **intentional** public-API change, run
 `./gradlew apiCheck` (part of `build`) fails on unintended drift. Never edit the
 `.api` file by hand.
 
+## Changelog
+
+[`CHANGELOG.md`](CHANGELOG.md) is hand-written in
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. The JetBrains
+[gradle-changelog-plugin](https://github.com/JetBrains/gradle-changelog-plugin) parses
+and renders it and never generates an entry from a commit.
+
+Add an entry under `## [Unreleased]` for anything a consumer would notice — a new or
+changed public API, a behaviour change, a fix to something they could have hit, a
+security property, a compressed-output or frame-format change. Refactors, test-only
+changes and CI work need none.
+
+**A change that moves `api/kzstd.api` or `api/kzstd.klib.api` always needs an entry**,
+and it goes under `### Breaking` if a consumer has to change code rather than just
+recompile. `Breaking` leads the group order for that reason: with committed ABI dumps,
+the first thing a consumer needs to know is whether recompiling is enough.
+
+The changelog is also what the GitHub Release page says — `release.yml` renders
+`./gradlew getChangelog --no-header --no-links` into the release body, and GitHub's own
+`generate_release_notes` is deliberately off, so a release is described once.
+
 ## Submitting a change
 
-1. Branch off `master`.
+1. Branch off `main`.
 2. Make the change; add tests for any new behavior.
 3. Run `./gradlew build` and fix anything red. If you changed the public API, run
    `./gradlew apiDump` and commit the result.
-4. Sign off every commit (`git commit -s`).
-5. Open the PR and describe what changed and why.
+4. Add a `CHANGELOG.md` entry under `## [Unreleased]` if a consumer would notice —
+   see [Changelog](#changelog) above. An `api/*.api` move always needs one.
+5. Sign off every commit (`git commit -s`).
+6. Open the PR and describe what changed and why.
 
 ## Reusing code from sibling Meshtastic-org projects
 

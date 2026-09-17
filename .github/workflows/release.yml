@@ -45,6 +45,19 @@ jobs:
           fi
           echo "✓ version $VF"
 
+          # The changelog is the third source. `getChangelog` does NOT fail when the
+          # declared version has no section — it silently returns the most recent
+          # released one, which would ship the PREVIOUS release's notes as this
+          # release's body. Check the heading exists here instead.
+          # awk, not grep -E: the version is a literal and its dots are ERE
+          # wildcards. `index($0, v) == 1` is "this line starts with exactly
+          # this string", with no escaping to get wrong.
+          if ! awk -v v="## [$VF]" 'index($0, v) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$VF]' section — run './gradlew patchChangelog' and commit it before releasing."
+            exit 1
+          fi
+          echo "✓ CHANGELOG.md has a section for $VF"
+
       - name: Setup JDK 21
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
@@ -160,18 +173,44 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
         run: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace
 
+      - name: Render release notes
+        # The changelog section for this version IS the release notes. The
+        # alternative — `generate_release_notes: true` — describes the release a
+        # second time from commit titles, and the hand-written description and the
+        # generated one then drift. `getChangelog` reads the same CHANGELOG.md the
+        # version check above already proved has a section for this version.
+        env:
+          DEVELOCITY_ACCESS_KEY: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          cat > release-notes.md <<EOF
+          ## kzstd v${V}
+
+          Pure-Kotlin multiplatform Zstandard (zstd) codec with dictionary support —
+          interoperable with libzstd, zero runtime dependencies.
+
+          \`\`\`kotlin
+          implementation("org.meshtastic:kzstd:${V}")
+          \`\`\`
+
+          ### Changes
+
+          EOF
+          # Capture first so a Gradle failure fails this step (a pipeline would hide
+          # it — GitHub's default shell sets -e but not -o pipefail).
+          NOTES=$(./gradlew --console=plain -q getChangelog --no-header --no-links)
+          # `-q` silences task output, but Develocity still prints the build-scan URL
+          # on its own line. `sed` rather than `grep -v`: grep exits 1 when it filters
+          # everything, which would fail the step on an empty section.
+          printf '%s\n' "$NOTES" \
+            | sed -E '/^(Publishing build scan|https:\/\/community\.develocity\.cloud)/d' \
+            >> release-notes.md
+          echo "--- rendered release notes ---"
+          cat release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
-          body: |
-            ## kzstd v${{ steps.version.outputs.version }}
-
-            Pure-Kotlin multiplatform Zstandard (zstd) codec with dictionary support —
-            interoperable with libzstd, zero runtime dependencies.
-
-            ```kotlin
-            implementation("org.meshtastic:kzstd:${{ steps.version.outputs.version }}")
-            ```
-          generate_release_notes: true
+          body_path: release-notes.md
