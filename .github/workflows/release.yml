@@ -49,7 +49,10 @@ jobs:
           # declared version has no section — it silently returns the most recent
           # released one, which would ship the PREVIOUS release's notes as this
           # release's body. Check the heading exists here instead.
-          if ! grep -qE "^## \\[${VF}\\]" CHANGELOG.md; then
+          # awk, not grep -E: the version is a literal and its dots are ERE
+          # wildcards. `index($0, v) == 1` is "this line starts with exactly
+          # this string", with no escaping to get wrong.
+          if ! awk -v v="## [$VF]" 'index($0, v) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
             echo "::error::CHANGELOG.md has no '## [$VF]' section — run './gradlew patchChangelog' and commit it before releasing."
             exit 1
           fi
