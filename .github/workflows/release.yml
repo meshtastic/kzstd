@@ -132,6 +132,41 @@ jobs:
           git tag -a "v$V" -m "Release v$V"
           git push origin "v$V"
 
+      - name: Render release notes
+        # The changelog section for this version IS the release notes. The
+        # alternative — `generate_release_notes: true` — describes the release a
+        # second time from commit titles, and the hand-written description and the
+        # generated one then drift. `getChangelog` reads the same CHANGELOG.md the
+        # version check above already proved has a section for this version.
+        env:
+          DEVELOCITY_ACCESS_KEY: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          cat > release-notes.md <<EOF
+          ## kzstd v${V}
+
+          Pure-Kotlin multiplatform Zstandard (zstd) codec with dictionary support —
+          interoperable with libzstd, zero runtime dependencies.
+
+          \`\`\`kotlin
+          implementation("org.meshtastic:kzstd:${V}")
+          \`\`\`
+
+          ### Changes
+
+          EOF
+          # Capture first so a Gradle failure fails this step (a pipeline would hide
+          # it — GitHub's default shell sets -e but not -o pipefail).
+          NOTES=$(./gradlew --console=plain -q getChangelog --no-header --no-links)
+          # `-q` silences task output, but Develocity still prints the build-scan URL
+          # on its own line. `sed` rather than `grep -v`: grep exits 1 when it filters
+          # everything, which would fail the step on an empty section.
+          printf '%s\n' "$NOTES" \
+            | sed -E '/^(Publishing build scan|https:\/\/community\.develocity\.cloud)/d' \
+            >> release-notes.md
+          echo "--- rendered release notes ---"
+          cat release-notes.md
+
       - name: Stage signed artifacts locally
         env:
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
@@ -172,41 +207,6 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
         run: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace
-
-      - name: Render release notes
-        # The changelog section for this version IS the release notes. The
-        # alternative — `generate_release_notes: true` — describes the release a
-        # second time from commit titles, and the hand-written description and the
-        # generated one then drift. `getChangelog` reads the same CHANGELOG.md the
-        # version check above already proved has a section for this version.
-        env:
-          DEVELOCITY_ACCESS_KEY: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
-        run: |
-          V="${{ steps.version.outputs.version }}"
-          cat > release-notes.md <<EOF
-          ## kzstd v${V}
-
-          Pure-Kotlin multiplatform Zstandard (zstd) codec with dictionary support —
-          interoperable with libzstd, zero runtime dependencies.
-
-          \`\`\`kotlin
-          implementation("org.meshtastic:kzstd:${V}")
-          \`\`\`
-
-          ### Changes
-
-          EOF
-          # Capture first so a Gradle failure fails this step (a pipeline would hide
-          # it — GitHub's default shell sets -e but not -o pipefail).
-          NOTES=$(./gradlew --console=plain -q getChangelog --no-header --no-links)
-          # `-q` silences task output, but Develocity still prints the build-scan URL
-          # on its own line. `sed` rather than `grep -v`: grep exits 1 when it filters
-          # everything, which would fail the step on an empty section.
-          printf '%s\n' "$NOTES" \
-            | sed -E '/^(Publishing build scan|https:\/\/community\.develocity\.cloud)/d' \
-            >> release-notes.md
-          echo "--- rendered release notes ---"
-          cat release-notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
