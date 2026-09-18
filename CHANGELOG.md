@@ -4,6 +4,30 @@ All notable changes to kzstd are documented here. The format is based on [Keep a
 
 ## [Unreleased]
 
+## [0.2.1]
+
+Maintenance release. No wire format, encoder behaviour or public-API change —
+the committed ABI dumps are identical to 0.2.0.
+
+### Changed
+
+- zstd-jni 1.5.7-16 on the JVM backend.
+- Kotlin 2.4.20, Gradle 9.7.1, and the Gradle daemon JVM pinned to 21 so a
+  JDK 25 toolchain no longer picks itself to run the build.
+- Snapshots publish from a Linux runner rather than macOS.
+- The configuration cache is enabled.
+
+### Fixed
+
+- Raised the JS test-harness CVE floors flagged by Dependabot on 2026-08-19.
+  Test-only; nothing in the published artifacts changed.
+
+### Build
+
+- A release now describes itself once, from this file: the workflow fails when
+  a version has no section here, and the GitHub release body is rendered from
+  that section instead of from commit titles.
+
 ## [0.2.0]
 
 Encoder-side parity work closing several gaps against the libzstd/RFC 8878
@@ -196,7 +220,8 @@ extracted from [TAKPacket-SDK](https://github.com/meshtastic/TAKPacket-SDK).
 - The `level` parameter is currently a no-op; the encoder uses a single fixed
   greedy/lazy strategy. Frames remain libzstd-compatible regardless.
 
-[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/meshtastic/kzstd/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/meshtastic/kzstd/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/meshtastic/kzstd/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/meshtastic/kzstd/compare/v0.1.0...v0.1.1
