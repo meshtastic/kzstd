@@ -30,6 +30,10 @@ changelog {
     // `patchChangelog` cuts cannot disagree with the artifact being released.
     version = providers.gradleProperty("VERSION_NAME")
     repositoryUrl = "https://github.com/meshtastic/kzstd"
+    // An empty Unreleased fails the bump here, with the plugin's own message.
+    // The default skips the task green and leaves no heading, which the release
+    // gate would only catch one tag later.
+    patchEmpty = false
     // Breaking leads: kzstd carries committed ABI dumps, so what a consumer needs
     // first is whether recompiling is enough. Keep a Changelog has no word for it.
     groups = listOf("Breaking", "Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
