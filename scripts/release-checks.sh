@@ -23,9 +23,15 @@ green_ci() {
   local sha="$1"
   shift
   local repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set}"
-  local -a checks=("$@")
-  if [ ${#checks[@]} -eq 0 ]; then
-    mapfile -t checks < <(gh api "repos/$repo/rules/branches/main" \
+  # No mapfile: macOS runners ship Bash 3.2.
+  local -a checks=()
+  local name
+  if [ $# -gt 0 ]; then
+    checks=("$@")
+  else
+    while IFS= read -r name; do
+      [ -n "$name" ] && checks+=("$name")
+    done < <(gh api "repos/$repo/rules/branches/main" \
       --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context')
   fi
   [ ${#checks[@]} -gt 0 ] || die "no required checks on main and none named; refusing to release unchecked"
@@ -58,8 +64,11 @@ green_ci() {
 no_snapshots() {
   local version="$1"
   local root="${MAVEN_LOCAL:-$HOME/.m2/repository}/org/meshtastic"
-  local -a staged
-  mapfile -t staged < <(find "$root" -path "*/$version/*" \( -name '*.pom' -o -name '*.module' \) 2>/dev/null)
+  local -a staged=()
+  local path
+  while IFS= read -r path; do
+    staged+=("$path")
+  done < <(find "$root" -path "*/$version/*" \( -name '*.pom' -o -name '*.module' \) 2>/dev/null)
   [ ${#staged[@]} -gt 0 ] || die "nothing staged for $version under $root; run publishToMavenLocal first"
   local hits
   hits="$(grep -H -- '-SNAPSHOT' "${staged[@]}" || true)"
