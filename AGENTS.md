@@ -50,8 +50,8 @@ would be over-engineering here.
   (`ZSTD_WINDOWLOG_LIMIT_DEFAULT` = windowLog 27), so `encode()` rejects it
   with a `ZstdException` up front rather than emit a frame most real-world
   libzstd consumers refuse. Keep this guard — it's what "frames stay
-  libzstd-interoperable in both directions" actually requires now that
-  multi-block encoding has no other size limit.
+  libzstd-interoperable in both directions" requires, because multi-block
+  encoding has no other size limit.
 - **No shared mutable state, no lock.** A `ZstdDictionary` digests its dictionary
   once in its constructor and is immutable thereafter; the engine objects keep all
   per-call state in locals. Do not reintroduce global caches. The encoder's
@@ -60,8 +60,10 @@ would be over-engineering here.
 - **`maxSize` is a required decompression-bomb guard** on every decode.
 - **The public API throws only `ZstdException`** (annotated `@Throws` so it bridges
   to Swift / Kotlin-Native callers instead of aborting the process).
-- **`explicitApi()` + binary-compatibility-validator:** run `./gradlew apiDump`
-  after any public-API change and commit `api/kzstd.api`.
+- **`explicitApi()` + binary-compatibility-validator with the klib dump:** run
+  `./gradlew apiDump` on macOS after any public-API change and commit both
+  `api/kzstd.api` and `api/kzstd.klib.api`. Elsewhere the Apple targets are kept
+  from the committed dump, not regenerated.
 - **Frames stay libzstd-interoperable in both directions** — guarded by the
   `jvmTest` zstd-jni oracle and the pinned cross-target dict-entropy fixture.
 
