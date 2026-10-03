@@ -1,64 +1,109 @@
 name: Release
 
+# Dispatch from main with the version a merged release PR set, or push its tag.
+# Every gate runs before the tag is pushed, so a refused release leaves no tag behind.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.3.0 (must match VERSION)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Run every gate and stage the artifacts, but tag, publish and release nothing'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: release-${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
-  # the "Require green CI" step reads check-runs for the commit being released
-  checks: read
+  contents: read
 
 jobs:
   release:
-    name: Test, build & publish to Maven Central
-    # Linux publishes every target. Kotlin/Native cross-compiles the Apple klibs
-    # (iOS, macOS, tvOS) from any host since 2.1, so a macOS runner buys nothing
-    # here — kzstd assembles no XCFramework and has no cinterop, so there is
-    # nothing left that needs Xcode. Verified against 0.2.0: a Linux publish
-    # produces the same 14 artifacts Maven Central holds, Apple klibs included.
-    # What a Linux host cannot do is *execute* the Apple test binaries; the
-    # "Require green CI" step below is what keeps that guarantee.
+    name: Gate, publish to Maven Central & release
+    # Kotlin/Native cross-compiles the Apple klibs from Linux and kzstd has no cinterop, so
+    # Linux publishes every target. It cannot run the Apple tests; the green-CI gate covers them.
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      checks: read
+    env:
+      DRY_RUN: ${{ inputs.dry_run || false }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Read version
+      - name: Resolve version
         id: version
-        run: echo "version=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+        env:
+          REQUESTED: ${{ inputs.version || github.ref_name }}
+        run: echo "version=${REQUESTED#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Verify VERSION matches gradle.properties
+      - name: Release from main only
+        if: env.DRY_RUN != 'true'
         run: |
-          VF="${{ steps.version.outputs.version }}"
-          VG=$(grep -E "^VERSION_NAME=" gradle.properties | cut -d'=' -f2 | tr -d '[:space:]')
-          if [ "$VF" != "$VG" ]; then
-            echo "::error::VERSION ($VF) != gradle.properties VERSION_NAME ($VG)"
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$GITHUB_REF is not on main; release from main (dry_run may run anywhere)"
             exit 1
           fi
-          echo "✓ version $VF"
 
-          # The changelog is the third source. `getChangelog` does NOT fail when the
-          # declared version has no section — it silently returns the most recent
-          # released one, which would ship the PREVIOUS release's notes as this
-          # release's body. Check the heading exists here instead.
-          # awk, not grep -E: the version is a literal and its dots are ERE
-          # wildcards. `index($0, v) == 1` is "this line starts with exactly
-          # this string", with no escaping to get wrong.
-          if ! awk -v v="## [$VF]" 'index($0, v) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## [$VF]' section — run './gradlew patchChangelog' and commit it before releasing."
+      - name: Verify the version sources agree
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          VF=$(tr -d '[:space:]' < VERSION)
+          VG=$(sed -n 's/^VERSION_NAME=//p' gradle.properties | tr -d '[:space:]')
+          if [ "$V" != "$VF" ] || [ "$V" != "$VG" ]; then
+            echo "::error::releasing $V, but VERSION is $VF and VERSION_NAME is $VG"
             exit 1
           fi
-          echo "✓ CHANGELOG.md has a section for $VF"
+          git fetch --quiet origin "refs/tags/v$V:refs/tags/v$V" 2>/dev/null || true
+          if git rev-parse --quiet --verify "v$V^{commit}" >/dev/null &&
+             [ "$(git rev-parse "v$V^{commit}")" != "$(git rev-parse HEAD)" ]; then
+            if [ "$DRY_RUN" = true ]; then
+              echo "::warning::v$V already exists on another commit; a real release would stop here"
+            else
+              echo "::error::v$V already exists on another commit"
+              exit 1
+            fi
+          fi
+          echo "releasing $V from $(git rev-parse --short HEAD)"
 
-      - name: Setup JDK 21
+      - name: Render release notes
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          NOTES=$(scripts/changelog.sh notes "$V")
+          cat > release-notes.md <<EOF
+          Pure-Kotlin multiplatform Zstandard (zstd) codec with dictionary support,
+          interoperable with libzstd, zero runtime dependencies.
+
+          \`\`\`kotlin
+          implementation("org.meshtastic:kzstd:${V}")
+          \`\`\`
+
+          ${NOTES}
+          EOF
+          cat release-notes.md
+
+      # CI does not run on tags, so the Apple tests this runner cannot execute are only
+      # guaranteed by the required checks having passed on this exact commit.
+      - name: Require green CI on the commit being released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release-checks.sh green-ci "$(git rev-parse HEAD)"
+
+      - name: Setup JDK 25
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -77,140 +122,72 @@ jobs:
           restore-keys: |
             konan-${{ runner.os }}-
 
-      # CI does not run on tags, and workflow_dispatch can release any ref — so the
-      # Apple *tests* (macOS-only, and the one thing this runner cannot do) are only
-      # guaranteed if the commit being released already passed them on a branch.
-      - name: Require green CI on the commit being released
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          SHA=$(git rev-parse HEAD)
-          JOB="Build, test & API check (all KMP targets)"
-          for _ in $(seq 1 60); do
-            # -f filters server-side: the unfiltered check-runs list is paginated,
-            # so a client-side match can miss the job entirely and wait forever.
-            if ! CONC=$(gh api -X GET \
-              "repos/${{ github.repository }}/commits/$SHA/check-runs" \
-              -f check_name="$JOB" --jq '.check_runs[0].conclusion // ""'); then
-              echo "::warning::check-runs query failed; retrying"
-              sleep 30
-              continue
-            fi
-            case "$CONC" in
-              success) echo "✓ $JOB passed on $SHA"; exit 0 ;;
-              "") echo "waiting for '$JOB' on $SHA…"; sleep 30 ;;
-              *) echo "::error::'$JOB' concluded '$CONC' on $SHA — not releasing"; exit 1 ;;
-            esac
-          done
-          echo "::error::timed out waiting for '$JOB' on $SHA"
-          exit 1
-
       - name: Build, test & API check (all targets)
-        # On Linux this compiles every target and runs every test that can execute
-        # here (JVM/JS/Wasm/linuxX64). The Apple test binaries are covered by the
-        # CI guard above.
         run: ./gradlew build --stacktrace
-
-      - name: Resolve tag state on origin
-        id: tag_state
-        run: |
-          V="${{ steps.version.outputs.version }}"
-          git fetch origin "refs/tags/v$V:refs/tags/v$V" 2>/dev/null || true
-          if git rev-parse "v$V" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Push release tag to origin
-        if: github.event_name == 'workflow_dispatch' && steps.tag_state.outputs.exists == 'false'
-        run: |
-          V="${{ steps.version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v$V" -m "Release v$V"
-          git push origin "v$V"
-
-      - name: Render release notes
-        # The changelog section for this version IS the release notes. The
-        # alternative — `generate_release_notes: true` — describes the release a
-        # second time from commit titles, and the hand-written description and the
-        # generated one then drift. `getChangelog` reads the same CHANGELOG.md the
-        # version check above already proved has a section for this version.
-        env:
-          DEVELOCITY_ACCESS_KEY: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
-        run: |
-          V="${{ steps.version.outputs.version }}"
-          cat > release-notes.md <<EOF
-          ## kzstd v${V}
-
-          Pure-Kotlin multiplatform Zstandard (zstd) codec with dictionary support —
-          interoperable with libzstd, zero runtime dependencies.
-
-          \`\`\`kotlin
-          implementation("org.meshtastic:kzstd:${V}")
-          \`\`\`
-
-          ### Changes
-
-          EOF
-          # Capture first so a Gradle failure fails this step (a pipeline would hide
-          # it — GitHub's default shell sets -e but not -o pipefail).
-          NOTES=$(./gradlew --console=plain -q getChangelog --no-header --no-links)
-          # `-q` silences task output, but Develocity still prints the build-scan URL
-          # on its own line. `sed` rather than `grep -v`: grep exits 1 when it filters
-          # everything, which would fail the step on an empty section.
-          printf '%s\n' "$NOTES" \
-            | sed -E '/^(Publishing build scan|https:\/\/community\.develocity\.cloud)/d' \
-            >> release-notes.md
-          echo "--- rendered release notes ---"
-          cat release-notes.md
 
       - name: Stage signed artifacts locally
         env:
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
-        run: ./gradlew publishToMavenLocal --stacktrace
+        run: ./gradlew publishToMavenLocal --no-configuration-cache --stacktrace
 
-      - name: Collect artifacts for attestation
+      - name: Refuse a -SNAPSHOT dependency
+        run: scripts/release-checks.sh no-snapshots "${{ steps.version.outputs.version }}"
+
+      - name: Collect every staged artifact for attestation
         run: |
           mkdir -p maven-attestation
-          find ~/.m2/repository/org/meshtastic/kzstd -type f \
-            \( -name "*.jar" -o -name "*.klib" -o -name "*.pom" -o -name "*.module" \) \
+          find ~/.m2/repository/org/meshtastic -path "*/${{ steps.version.outputs.version }}/*" -type f \
+            \( -name '*.jar' -o -name '*.klib' -o -name '*.pom' -o -name '*.module' \) \
             -exec cp {} maven-attestation/ \;
-          ls -lh maven-attestation/
+          ls -1 maven-attestation
 
-      - name: Attest artifacts
+      - name: Attest the staged artifacts
+        if: env.DRY_RUN != 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: maven-attestation/*
 
       - name: Check Maven Central state
-        # Probe whether v$VERSION is already on Maven Central; if so, skip publish
-        # (Sonatype rejects re-uploads), so a retry after a partial release is safe.
-        id: mc_check
+        # Sonatype rejects a re-upload, so a re-run after a partial release skips the publish.
+        id: central
+        env:
+          V: ${{ steps.version.outputs.version }}
         run: |
-          V="${{ steps.version.outputs.version }}"
           HTTP=$(curl -sS -o /dev/null -w "%{http_code}" \
             "https://repo1.maven.org/maven2/org/meshtastic/kzstd-jvm/$V/kzstd-jvm-$V.pom")
-          echo "Maven Central POM probe for v$V: HTTP $HTTP"
-          if [ "$HTTP" = "200" ]; then
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          echo "Maven Central POM probe for $V: HTTP $HTTP"
+          echo "published=$([ "$HTTP" = 200 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Push the release tag
+        if: env.DRY_RUN != 'true'
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          if git rev-parse --quiet --verify "v$V" >/dev/null; then
+            echo "v$V already on origin"
+            exit 0
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$V" -m "v$V"
+          git push origin "v$V"
 
       - name: Publish to Maven Central
-        if: steps.mc_check.outputs.already_published == 'false'
+        if: env.DRY_RUN != 'true' && steps.central.outputs.published != 'true'
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.OSSRH_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
-        run: ./gradlew publishAllPublicationsToMavenCentralRepository --stacktrace
+        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache --stacktrace
 
-      - name: Create GitHub Release
+      - name: Create or update the GitHub Release
+        if: env.DRY_RUN != 'true'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
           body_path: release-notes.md
+
+      - name: Dry-run summary
+        if: env.DRY_RUN == 'true'
+        run: echo "dry run passed every gate for ${{ steps.version.outputs.version }}; nothing was tagged, published or released"

@@ -10,10 +10,6 @@ plugins {
     alias(libs.plugins.kover)
     alias(libs.plugins.spotless)
     alias(libs.plugins.detekt)
-    // Manages CHANGELOG.md, which stays hand-written: it parses and renders the
-    // file and never generates an entry from a commit. `patchChangelog` is the
-    // release step; `getChangelog` is what release.yml reads for the Release body.
-    alias(libs.plugins.changelog)
 }
 
 // GROUP / VERSION_NAME come from gradle.properties — the single coordinate source
@@ -23,26 +19,6 @@ version = providers.gradleProperty("VERSION_NAME").getOrElse("0.1.0")
 
 repositories {
     mavenCentral()
-}
-
-changelog {
-    // The same property the coordinate is published under, so the heading
-    // `patchChangelog` cuts cannot disagree with the artifact being released.
-    version = providers.gradleProperty("VERSION_NAME")
-    repositoryUrl = "https://github.com/meshtastic/kzstd"
-    // An empty Unreleased fails the bump here, with the plugin's own message.
-    // The default skips the task green and leaves no heading, which the release
-    // gate would only catch one tag later.
-    patchEmpty = false
-    // Breaking leads: kzstd carries committed ABI dumps, so what a consumer needs
-    // first is whether recompiling is enough. Keep a Changelog has no word for it.
-    groups = listOf("Breaking", "Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
-    // `patchChangelog` rewrites everything between the title and the first section
-    // from this value, so anything that must survive a release lives here.
-    introduction =
-        """
-        All notable changes to kzstd are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-        """.trimIndent()
 }
 
 kotlin {
