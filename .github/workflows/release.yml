@@ -2,7 +2,8 @@ name: Release
 
 # Dispatch from main with the version a merged release PR set, or push its tag.
 # A dispatch pushes the tag only after every gate, so a refused dispatch leaves no tag.
-# A pushed tag runs the same gates but already exists; delete it if they refuse.
+# A pushed tag runs the same gates but already exists, and the org forbids deleting tags,
+# so a refused pushed tag is spent: fix the cause and release the next patch.
 on:
   push:
     tags: ['v*']
