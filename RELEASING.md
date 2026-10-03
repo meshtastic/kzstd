@@ -1,43 +1,48 @@
 # Releasing
 
-kzstd publishes to Maven Central (`org.meshtastic:kzstd`) via the vanniktech
-maven-publish plugin, driven by `.github/workflows/release.yml`. JitPack
+kzstd publishes `org.meshtastic:kzstd` to Maven Central with the vanniktech
+maven-publish plugin, from `.github/workflows/release.yml`. JitPack
 (`com.github.meshtastic:kzstd`) is a fallback channel.
 
-## One-time setup
+## Secrets
 
-The repository needs three GitHub Actions secrets (the vanniktech
-`ORG_GRADLE_PROJECT_*` convention):
-
-- `SIGNING_KEY` — the in-memory GPG signing key.
-- `OSSRH_USERNAME` — Sonatype Central Portal username.
-- `OSSRH_PASSWORD` — Sonatype Central Portal password.
+`SIGNING_KEY` (the in-memory GPG key), `OSSRH_USERNAME` and `OSSRH_PASSWORD` (Central
+Portal credentials), passed as the vanniktech `ORG_GRADLE_PROJECT_*` properties.
 
 ## Cutting a release
 
-1. Pick the new version `X.Y.Z` (SemVer; pre-1.0 may break in minors).
-2. Update `VERSION` **and** `gradle.properties` (`VERSION_NAME`) to `X.Y.Z` — they
-   must match (the release workflow verifies this and fails loudly otherwise).
-3. Run `./gradlew patchChangelog`. It cuts the `## [Unreleased]` entries into a
-   dated `## [X.Y.Z]` heading, leaves an empty Unreleased behind, and writes the
-   compare links — reading `VERSION_NAME`, so step 2 has to come first. Review the
-   diff: it is what the GitHub Release page will say. The release workflow refuses
-   to publish a version with no section, because `getChangelog` would otherwise fall
-   back silently to the previous release's notes.
-4. If the public API changed, ensure `api/kzstd.api` was refreshed (`./gradlew apiDump`).
-5. Commit (signed off) and open/merge the PR.
-6. Trigger the release: push a `vX.Y.Z` tag, or run the **Release** workflow via
-   `workflow_dispatch` (it tags for you).
+1. Pick `X.Y.Z` (SemVer; before 1.0 a minor may break).
+2. On a branch, set `VERSION` and `VERSION_NAME` in `gradle.properties` to `X.Y.Z`, and
+   run `scripts/changelog.sh cut X.Y.Z`. That moves `## [Unreleased]` under a dated
+   `## [X.Y.Z]` heading and updates the compare links, touching nothing else. It refuses
+   an empty Unreleased.
+3. If the public API changed, `./gradlew apiDump` and commit `api/`.
+4. Commit `chore(release): X.Y.Z` (signed off), open the PR and merge it.
+5. `gh workflow run release.yml --repo meshtastic/kzstd -f version=X.Y.Z`. Add
+   `-f dry_run=true` to run every gate without tagging or publishing; a dry run may
+   start from any branch. Pushing a `vX.Y.Z` tag on `main` runs the same workflow.
 
-The workflow then builds all 13 targets on `macos-latest`, publishes to Maven
-Central, and creates a GitHub Release whose body is `./gradlew getChangelog` — not
-GitHub's generated commit list, which would describe the release a second time and
-drift from the hand-written one. It is **idempotent**: it probes `repo1.maven.org`
-first and skips the publish if `X.Y.Z` is already there, so a re-run after a partial
-failure is safe.
+## What the workflow checks, in order
+
+1. The commit is on `main` (skipped for a dry run).
+2. The version equals `VERSION` and `VERSION_NAME`, and any existing `vX.Y.Z` tag
+   points at this commit.
+3. `scripts/changelog.sh notes X.Y.Z` finds a non-empty section. It becomes the GitHub
+   Release body verbatim.
+4. Every check the `main` ruleset requires passed on this commit
+   (`scripts/release-checks.sh green-ci`). That is where the Apple tests ran; this
+   Linux runner cannot run them.
+5. `./gradlew build`, then `publishToMavenLocal` with signing.
+6. No staged POM or Gradle module depends on a `-SNAPSHOT`
+   (`scripts/release-checks.sh no-snapshots`). Central rejects that only after upload.
+7. If `X.Y.Z` is already on `repo1.maven.org` the publish is skipped, so a re-run is
+   safe.
+
+Then it attests every staged artifact, pushes the annotated `vX.Y.Z` tag if it is
+missing, runs `publishAndReleaseToMavenCentral`, and creates or updates the GitHub
+Release.
 
 ## After releasing
 
-Maven Central → repo1 propagation typically takes 10–30 minutes. Verify
-`https://repo1.maven.org/maven2/org/meshtastic/kzstd-jvm/X.Y.Z/` resolves before
-downstream consumers bump.
+`repo1.maven.org` lags the Central Portal by 10 to 30 minutes. Downstream bumps wait
+until `https://repo1.maven.org/maven2/org/meshtastic/kzstd-jvm/X.Y.Z/` resolves.

@@ -85,8 +85,9 @@ on their own host.
 ## Publishing
 
 Maven Central via the vanniktech plugin (`org.meshtastic:kzstd`); JitPack is a
-fallback (`com.github.meshtastic:kzstd`). Releases are tag-driven — see
-`RELEASING.md`.
+fallback (`com.github.meshtastic:kzstd`). A release is a merged release PR plus a
+dispatch of `release.yml`; see `RELEASING.md`. Cut changelog sections with
+`scripts/changelog.sh`, never by re-rendering the file.
 
 ## Conventions
 

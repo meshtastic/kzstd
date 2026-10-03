@@ -63,9 +63,9 @@ and `explicitApi()`. After an **intentional** public-API change, run
 ## Changelog
 
 [`CHANGELOG.md`](CHANGELOG.md) is hand-written in
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form. The JetBrains
-[gradle-changelog-plugin](https://github.com/JetBrains/gradle-changelog-plugin) parses
-and renders it and never generates an entry from a commit.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form, and nothing generates an
+entry from a commit. `scripts/changelog.sh` cuts and reads sections without re-rendering
+the file, so prose under any heading survives a release.
 
 Add an entry under `## [Unreleased]` for anything a consumer would notice — a new or
 changed public API, a behaviour change, a fix to something they could have hit, a
@@ -74,12 +74,13 @@ changes and CI work need none.
 
 **A change that moves `api/kzstd.api` or `api/kzstd.klib.api` always needs an entry**,
 and it goes under `### Breaking` if a consumer has to change code rather than just
-recompile. `Breaking` leads the group order for that reason: with committed ABI dumps,
-the first thing a consumer needs to know is whether recompiling is enough.
+recompile. `Breaking` comes first in a section for that reason: with committed ABI
+dumps, the first thing a consumer needs to know is whether recompiling is enough.
 
-The changelog is also what the GitHub Release page says — `release.yml` renders
-`./gradlew getChangelog --no-header --no-links` into the release body, and GitHub's own
-`generate_release_notes` is deliberately off, so a release is described once.
+The changelog is also what the GitHub Release page says. `release.yml` puts
+`scripts/changelog.sh notes X.Y.Z` in the release body, and GitHub's own
+`generate_release_notes` is off, so a release is described once. Releasing is in
+[RELEASING.md](RELEASING.md).
 
 ## Submitting a change
 
