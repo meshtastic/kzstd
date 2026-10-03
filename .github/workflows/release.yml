@@ -1,7 +1,8 @@
 name: Release
 
 # Dispatch from main with the version a merged release PR set, or push its tag.
-# Every gate runs before the tag is pushed, so a refused release leaves no tag behind.
+# A dispatch pushes the tag only after every gate, so a refused dispatch leaves no tag.
+# A pushed tag runs the same gates but already exists; delete it if they refuse.
 on:
   push:
     tags: ['v*']
@@ -36,6 +37,7 @@ jobs:
       id-token: write
       attestations: write
       checks: read
+      statuses: read
     env:
       DRY_RUN: ${{ inputs.dry_run || false }}
     steps:
@@ -46,7 +48,13 @@ jobs:
         id: version
         env:
           REQUESTED: ${{ inputs.version || github.ref_name }}
-        run: echo "version=${REQUESTED#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          # A dispatch takes the bare version so the concurrency group above is canonical.
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "${REQUESTED#v}" != "$REQUESTED" ]; then
+            echo "::error::pass the version without a leading v: ${REQUESTED#v}"
+            exit 1
+          fi
+          echo "version=${REQUESTED#v}" >> "$GITHUB_OUTPUT"
 
       - name: Release from main only
         if: env.DRY_RUN != 'true'
@@ -153,10 +161,19 @@ jobs:
         env:
           V: ${{ steps.version.outputs.version }}
         run: |
-          HTTP=$(curl -sS -o /dev/null -w "%{http_code}" \
-            "https://repo1.maven.org/maven2/org/meshtastic/kzstd-jvm/$V/kzstd-jvm-$V.pom")
-          echo "Maven Central POM probe for $V: HTTP $HTTP"
-          echo "published=$([ "$HTTP" = 200 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          # Only a 404 means unpublished; anything else stops the release rather than guess.
+          for _ in 1 2 3 4 5; do
+            HTTP=$(curl -sS -o /dev/null -w "%{http_code}" \
+              "https://repo1.maven.org/maven2/org/meshtastic/kzstd-jvm/$V/kzstd-jvm-$V.pom" || echo 000)
+            echo "Maven Central POM probe for $V: HTTP $HTTP"
+            case "$HTTP" in
+              200) echo "published=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+              404) echo "published=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            esac
+            sleep 20
+          done
+          echo "::error::Maven Central did not answer 200 or 404 for $V"
+          exit 1
 
       - name: Push the release tag
         if: env.DRY_RUN != 'true'
