@@ -1,7 +1,7 @@
 # Code of Conduct
 
 This project follows the
-[Meshtastic Code of Conduct](https://meshtastic.org/docs/community/code-of-conduct/),
+[Meshtastic Code of Conduct](https://meshtastic.org/docs/legal/conduct/),
 which adopts the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
 v2.1.
 
