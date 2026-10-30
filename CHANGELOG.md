@@ -4,6 +4,24 @@ All notable changes to kzstd are documented here. The format is based on [Keep a
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-30
+
+Maintenance release. No wire format, encoder behaviour or public-API change -
+the committed ABI dumps are identical to 0.2.1.
+
+### Changed
+
+- The JVM artifact is Java 17 bytecode (class file 61), built with
+  `-Xjdk-release=17`, so it loads on a Java 17 runtime. 0.2.1 shipped class
+  file 65, which needed Java 21.
+- Kotlin 2.4.21 and Gradle 9.8.2.
+
+### Build
+
+- zstd-jni 1.5.7-24 for the JVM interop tests. It is a test-only oracle, not a
+  dependency of the published artifact.
+- A version bump fails on an empty Unreleased section.
+
 ## [0.2.1]
 
 Maintenance release. No wire format, encoder behaviour or public-API change —
@@ -220,7 +238,8 @@ extracted from [TAKPacket-SDK](https://github.com/meshtastic/TAKPacket-SDK).
 - The `level` parameter is currently a no-op; the encoder uses a single fixed
   greedy/lazy strategy. Frames remain libzstd-compatible regardless.
 
-[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/meshtastic/kzstd/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/meshtastic/kzstd/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/meshtastic/kzstd/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/meshtastic/kzstd/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/meshtastic/kzstd/compare/v0.1.1...v0.1.2
