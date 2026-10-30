@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -22,6 +23,18 @@ repositories {
 }
 
 kotlin {
+    // Compile with a JDK 21 toolchain, but emit Java 17 bytecode for the jvm target below.
+    //
+    // The codec is pure Kotlin and uses no API newer than 17: no java.lang.foreign, no virtual
+    // threads, no sequenced collections, no jdk.internal, and no native loading. So the class file
+    // version was only ever a consequence of the toolchain, and emitting 65 excluded consumers on
+    // a Java 17 runtime for nothing.
+    //
+    // Lowering it is a compatibility improvement rather than a trade: a class 61 jar runs on 17
+    // and on everything above it, so no existing consumer is affected. `-Xjdk-release=17` is the
+    // part that makes this real rather than cosmetic, because `jvmTarget` alone still compiles
+    // against the toolchain's newer class library and would let a post-17 API link successfully
+    // and then fail at runtime on 17.
     jvmToolchain(21)
     explicitApi()
 
@@ -34,7 +47,12 @@ kotlin {
         progressiveMode.set(true)
     }
 
-    jvm()
+    jvm {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+            freeCompilerArgs.add("-Xjdk-release=17")
+        }
+    }
 
     // The codec is pure-Kotlin in commonMain on EVERY target, so js / wasmJs /
     // wasmWasi need NO JS dependency: compress AND decompress run through the
