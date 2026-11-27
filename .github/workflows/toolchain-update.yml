@@ -69,4 +69,4 @@ jobs:
           body: |
             `./kotlin update` moved the wrappers from ${{ steps.update.outputs.before }} to ${{ steps.update.outputs.after }}, version and checksum together.
 
-            Before merging, check the Kotlin pin in `kzstd/module.yaml` and the staged wasm artifact ids (`scripts/release-checks.sh wasm-ids`), and read the [Toolchain release notes](https://github.com/JetBrains/kotlin-toolchain/releases). This pull request is never merged automatically.
+            Before merging, check the Kotlin pin in `kzstd/module.yaml` and the staged wasm artifact ids (`scripts/release-checks.sh wasm-ids <version>`, after `./kotlin publish mavenLocal`), and read the [Toolchain release notes](https://github.com/JetBrains/kotlin-toolchain/releases). This pull request is never merged automatically.
