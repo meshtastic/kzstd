@@ -1,0 +1,72 @@
+name: Update Kotlin Toolchain
+
+# Nightly: `./kotlin update` rewrites the kotlin and kotlin.bat wrappers to the newest Toolchain release, version and
+# checksum together, and this opens a pull request with the result. Renovate cannot do it: the checksum is of the
+# CLI download, and the wrapper script itself changes between releases.
+#
+# A person merges the pull request: a Toolchain release can move the Kotlin compiler, which a release build depends on.
+# It needs the TOOLCHAIN_UPDATE_TOKEN secret (contents and pull-requests write), because a pull
+# request opened with the workflow's own token starts no checks; without the secret the run says so and stops.
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update the Kotlin Toolchain wrappers
+    if: github.repository_owner == 'meshtastic'
+    runs-on: ubuntu-latest
+    env:
+      KOTLIN_CLI_NO_WELCOME_BANNER: 1
+      HAS_TOKEN: ${{ secrets.TOOLCHAIN_UPDATE_TOKEN != '' }}
+    steps:
+      - name: Stop without the token
+        if: env.HAS_TOKEN != 'true'
+        run: echo "::notice::TOOLCHAIN_UPDATE_TOKEN is not set, so no update was attempted"
+
+      - name: Checkout
+        if: env.HAS_TOKEN == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Update the wrappers
+        id: update
+        if: env.HAS_TOKEN == 'true'
+        run: |
+          before=$(sed -n 's/^kotlin_cli_version=//p' kotlin)
+          ./kotlin update < /dev/null
+          after=$(sed -n 's/^kotlin_cli_version=//p' kotlin)
+          if git diff --quiet -- kotlin kotlin.bat; then
+            echo "::notice::the Kotlin Toolchain is current at $before"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Kotlin Toolchain $before -> $after"
+            { echo "changed=true"; echo "before=$before"; echo "after=$after"; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the pull request
+        if: steps.update.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8
+        with:
+          token: ${{ secrets.TOOLCHAIN_UPDATE_TOKEN }}
+          add-paths: |
+            kotlin
+            kotlin.bat
+          branch: build/kotlin-toolchain-update
+          delete-branch: true
+          signoff: true
+          commit-message: 'build(deps): Kotlin Toolchain ${{ steps.update.outputs.after }}'
+          title: 'build(deps): Kotlin Toolchain ${{ steps.update.outputs.after }}'
+          body: |
+            `./kotlin update` moved the wrappers from ${{ steps.update.outputs.before }} to ${{ steps.update.outputs.after }}, version and checksum together.
+
+            Before merging, check the Kotlin pin in `kzstd/module.yaml` and the staged wasm artifact ids (`scripts/release-checks.sh wasm-ids <version>`, after `./kotlin publish mavenLocal`), and read the [Toolchain release notes](https://github.com/JetBrains/kotlin-toolchain/releases). This pull request is never merged automatically.
