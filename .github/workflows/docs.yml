@@ -32,10 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up JDK 21
+      - name: Set up JDK
         uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
-          java-version: "21"
+          java-version: "25"
           distribution: temurin
 
       # The Dokka 2.3.0 CLI and its plugin jars are fetched and checksum-pinned by the script.
