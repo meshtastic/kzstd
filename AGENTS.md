@@ -19,13 +19,15 @@ frames that interoperate with libzstd in both directions. It was extracted from
 
 ## Layout
 
-- `src/commonMain/kotlin/org/meshtastic/kzstd/` — the public API: `Zstd` (the
+- `kzstd/src/org/meshtastic/kzstd/` — the public API: `Zstd` (the
   compress/decompress facade), `ZstdDictionary` (a digested dictionary), and
   `ZstdException`.
-- `src/commonMain/kotlin/org/meshtastic/kzstd/internal/` — the RFC 8878 engine
+- `kzstd/src/org/meshtastic/kzstd/internal/` — the RFC 8878 engine
   (encoder, decoder, FSE/Huffman, bit readers/writers, dictionary parser, match
   index). All `internal`; not part of the public API.
-- `src/{commonTest,jvmTest,nativeTest,wasmWasiTest}/` — tests.
+- `kzstd/test`, `kzstd/test@jvm`, `kzstd/test@native`, `kzstd/test@wasmWasi` — tests.
+- `kzstd/module.yaml` and `project.yaml` — the Kotlin Toolchain build; `./kotlin` is the wrapper.
+- `abitool/` — the ABI dump and check tool; `plugins/detekt/` — the local detekt plugin.
 - `scripts/train_test_dict.py` — regenerates the committed trained test dictionary.
 
 This is intentionally a **single-module** project: kzstd is one small codec, so the
@@ -60,21 +62,20 @@ would be over-engineering here.
 - **`maxSize` is a required decompression-bomb guard** on every decode.
 - **The public API throws only `ZstdException`** (annotated `@Throws` so it bridges
   to Swift / Kotlin-Native callers instead of aborting the process).
-- **`explicitApi()` + binary-compatibility-validator with the klib dump:** run
-  `./gradlew apiDump` on macOS after any public-API change and commit both
-  `api/kzstd.api` and `api/kzstd.klib.api`. Elsewhere the Apple targets are kept
-  from the committed dump, not regenerated.
+- **`explicitApi()` + the ABI check with the klib dump:** run
+  `./kotlin run -m abitool -- dump "$PWD/build" api kzstd` on macOS after any public-API change
+  and commit both `api/kzstd.api` and `api/kzstd.klib.api`. CI runs `check`, which fails on
+  drift.
 - **Frames stay libzstd-interoperable in both directions** — guarded by the
-  `jvmTest` zstd-jni oracle and the pinned cross-target dict-entropy fixture.
+  JVM-test zstd-jni oracle and the pinned cross-target dict-entropy fixture.
 
-## Commands (needs JDK 21)
+## Commands
 
 ```bash
-export JAVA_HOME=/path/to/jdk-21
-./gradlew build          # compile all 13 targets, run tests, apiCheck
-./gradlew jvmTest        # JVM tests (incl. the zstd-jni interop oracle)
-./gradlew apiDump        # refresh the API baseline after public-API changes
-python3 scripts/train_test_dict.py   # regenerate the trained test dictionary
+./kotlin build                                        # compile all 13 targets
+./kotlin test -m kzstd -p jvm                         # JVM tests (incl. the zstd-jni interop oracle)
+./kotlin run -m abitool -- dump "$PWD/build" api kzstd   # refresh the API baseline after public-API changes
+python3 scripts/train_test_dict.py                    # regenerate the trained test dictionary
 ```
 
 The interop oracle (zstd-jni) and the native concurrency test run on macOS; the
@@ -84,10 +85,10 @@ on their own host.
 
 ## Publishing
 
-Maven Central via the vanniktech plugin (`org.meshtastic:kzstd`); JitPack is a
-fallback (`com.github.meshtastic:kzstd`). A release is a merged release PR plus a
-dispatch of `release.yml`; see `RELEASING.md`. Cut changelog sections with
-`scripts/changelog.sh`, never by re-rendering the file.
+Maven Central via the Kotlin Toolchain (`./kotlin publish mavenCentral`, `org.meshtastic:kzstd`);
+the first Toolchain release is staged with `publishingMode: manual`. JitPack is no longer a
+channel. A release is a merged release PR plus a dispatch of `release.yml`; see `RELEASING.md`.
+Cut changelog sections with `scripts/changelog.sh`, never by re-rendering the file.
 
 ## Conventions
 
