@@ -47,3 +47,8 @@ settings:
         url: https://github.com/meshtastic/kzstd
         connection: scm:git:git://github.com/meshtastic/kzstd.git
         developerConnection: scm:git:ssh://git@github.com/meshtastic/kzstd.git
+
+# The release stages signed artifacts here, then checks them before publishing to Central.
+repositories:
+  - url: mavenLocal
+    publish: true
