@@ -45,7 +45,8 @@ signed off. To fix retroactively: `git rebase --signoff HEAD~N && git push --for
 | Regenerate the trained test dictionary | `python3 scripts/train_test_dict.py` |
 
 The `kotlin` wrapper provisions the Toolchain and its own JDK, so there is no separate JDK to
-install. Run `./kotlin` from the repo root.
+install. Run `./kotlin` from the repo root. `.github/workflows/toolchain-update.yml` runs
+`./kotlin update` nightly and opens a pull request when a new Toolchain is out; a person merges it.
 
 detekt runs through the local plugin in `plugins/detekt`, without type resolution. ktlint reads `.editorconfig`, so that file remains the
 single source of Kotlin style; CI runs the ktlint CLI in check mode, so reformat with
