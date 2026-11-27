@@ -32,9 +32,9 @@ env:
 jobs:
   release:
     name: Gate, publish to Maven Central & release
-    # Kotlin/Native cross-compiles the Apple klibs from Linux and kzstd has no cinterop, so
-    # Linux publishes every target. It cannot run the Apple tests; the green-CI gate covers them.
-    runs-on: ubuntu-latest
+    # macOS, because the Toolchain builds Apple targets only on a Mac: on Linux `./kotlin build`
+    # skips them, and the publication would lack the Apple artifacts.
+    runs-on: macos-latest
     timeout-minutes: 90
     permissions:
       contents: write
@@ -134,8 +134,8 @@ jobs:
       - name: Build every module
         run: ./kotlin build
 
-      - name: Test (JVM, Wasm, linuxX64)
-        run: ./kotlin test -m kzstd -p jvm -p wasmJs -p linuxX64
+      - name: Test (JVM, Wasm, macOS)
+        run: ./kotlin test -m kzstd -p jvm -p wasmJs -p macosArm64
 
       # The Toolchain never signs a Maven Local publication; signing happens on the Central upload.
       - name: Stage artifacts locally

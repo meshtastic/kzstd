@@ -31,10 +31,11 @@ a channel: consumers take the artifacts from Central.
 3. `scripts/changelog.sh notes X.Y.Z` finds a non-empty section. It becomes the GitHub
    Release body verbatim.
 4. Every check the `main` ruleset requires passed on this commit
-   (`scripts/release-checks.sh green-ci`). That is where the Apple tests ran; this
-   Linux runner cannot run them.
-5. `./kotlin build`, the JVM, Wasm and linuxX64 tests, and the ABI check, then
-   `./kotlin publish mavenLocal` with signing into `$RUNNER_TEMP/m2`.
+   (`scripts/release-checks.sh green-ci`), including the macOS job's iOS simulator
+   tests and ABI check.
+5. On macOS, where the Toolchain builds the Apple targets: `./kotlin build`, the JVM,
+   Wasm and macOS tests, then `./kotlin publish mavenLocal` into `$RUNNER_TEMP/m2`
+   (unsigned; signing happens on the Central upload).
 6. No staged POM or module depends on a `-SNAPSHOT`
    (`scripts/release-checks.sh no-snapshots`). Central rejects that only after upload.
 7. If `X.Y.Z` is already on `repo1.maven.org` the publish is skipped, so a re-run is
