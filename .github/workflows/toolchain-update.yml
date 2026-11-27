@@ -33,6 +33,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Always the default branch, so a manual run from another branch still updates main.
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - name: Update the wrappers
