@@ -23,9 +23,9 @@ Fill out the sections below. Delete any that don't apply.
 
 - [ ] All commits are signed off (DCO — `git commit -s`).
 - [ ] I have read [`CONTRIBUTING.md`](../CONTRIBUTING.md).
-- [ ] If this changes the public API, I have run `./gradlew apiDump` and committed the regenerated `api/*.api` files.
-- [ ] If this changes codec behavior or the wire frame, I have verified round-trip and libzstd interop (`./gradlew jvmTest`).
-- [ ] I have run `./gradlew build` locally and it passes.
+- [ ] If this changes the public API, I have run `./kotlin run -m abitool -- dump "$PWD/build" api kzstd` and committed the regenerated `api/*` files.
+- [ ] If this changes codec behavior or the wire frame, I have verified round-trip and libzstd interop (`./kotlin test -m kzstd -p jvm`).
+- [ ] I have run `./kotlin build` locally and it passes.
 
 ## How was this verified?
 
