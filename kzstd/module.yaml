@@ -1,0 +1,43 @@
+product:
+  type: kmp/lib
+  platforms: [jvm, js, wasmJs, wasmWasi, iosArm64, iosSimulatorArm64, iosX64, macosArm64, tvosArm64, tvosSimulatorArm64, linuxX64, linuxArm64, mingwX64]
+
+# zstd-jni is a jvmTest-only oracle, never a runtime dependency.
+test-dependencies@jvm:
+  - com.github.luben:zstd-jni:1.5.7-29
+
+settings:
+  kotlin:
+    version: 2.4.21
+    explicitApi: strict
+    allWarningsAsErrors: true
+    progressiveMode: true
+  jvm:
+    jdk:
+      version: 21
+    release: 17
+  publishing:
+    enabled: true
+    group: org.meshtastic
+    artifactId: kzstd
+    version: 0.2.2
+    signArtifacts: true
+    publishSources: true
+    mavenCentral:
+      enabled: true
+      publishingMode: manual
+    pom:
+      name: kzstd
+      description: Pure-Kotlin multiplatform Zstandard (zstd) codec with dictionary support, interoperable with libzstd, zero runtime dependencies.
+      url: https://github.com/meshtastic/kzstd
+      licenses:
+        - name: GNU General Public License, Version 3.0
+          url: https://www.gnu.org/licenses/gpl-3.0.html
+      developers:
+        - id: meshtastic
+          name: Meshtastic
+          url: https://meshtastic.org
+      scm:
+        url: https://github.com/meshtastic/kzstd
+        connection: scm:git:git://github.com/meshtastic/kzstd.git
+        developerConnection: scm:git:ssh://git@github.com/meshtastic/kzstd.git
