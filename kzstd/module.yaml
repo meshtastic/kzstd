@@ -6,6 +6,12 @@ product:
 test-dependencies@jvm:
   - com.github.luben:zstd-jni:1.5.7-29
 
+plugins:
+  detekt:
+    enabled: true
+    configFile: detekt/detekt.yml
+    buildUponDefaultConfig: true
+
 settings:
   kotlin:
     version: 2.4.21
