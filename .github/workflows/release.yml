@@ -44,7 +44,6 @@ jobs:
       statuses: read
     env:
       DRY_RUN: ${{ inputs.dry_run || false }}
-      MAVEN_LOCAL: ${{ runner.temp }}/m2
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,8 +117,11 @@ jobs:
 
       - name: Point the toolchain caches at one directory
         run: |
-          echo "KOTLIN_CLI_BOOTSTRAP_CACHE_DIR=$HOME/kotlin-cache/cli" >> "$GITHUB_ENV"
-          echo "KOTLIN_SHARED_CACHE_DIR=$HOME/kotlin-cache/shared" >> "$GITHUB_ENV"
+          {
+            echo "KOTLIN_CLI_BOOTSTRAP_CACHE_DIR=$HOME/kotlin-cache/cli"
+            echo "KOTLIN_SHARED_CACHE_DIR=$HOME/kotlin-cache/shared"
+            echo "MAVEN_LOCAL=$RUNNER_TEMP/m2"
+          } >> "$GITHUB_ENV"
 
       - name: Cache the Kotlin Toolchain and dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -135,13 +137,8 @@ jobs:
       - name: Test (JVM, Wasm, linuxX64)
         run: ./kotlin test -m kzstd -p jvm -p wasmJs -p linuxX64
 
-      - name: API check
-        run: ./kotlin run -m abitool -- check "$PWD/build" api kzstd
-
-      - name: Stage signed artifacts locally
-        env:
-          KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSPHRASE }}
+      # The Toolchain never signs a Maven Local publication; signing happens on the Central upload.
+      - name: Stage artifacts locally
         run: |
           KOTLIN_CLI_JAVA_OPTIONS="-Dmaven.repo.local=$MAVEN_LOCAL" ./kotlin publish mavenLocal
 
@@ -196,14 +193,11 @@ jobs:
           git tag -a "v$V" -m "v$V"
           git push origin "v$V"
 
-      # Publishing mode is manual for the first Toolchain release: the upload is staged on the Central
-      # portal and released by hand. The Central credential variable names are not yet verified
-      # against the Toolchain publishing docs.
+      # publishingMode is manual: the upload waits in the Central Portal to be released by hand.
       - name: Publish to Maven Central
         if: env.DRY_RUN != 'true' && steps.central.outputs.published != 'true'
         env:
           KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIGNING_KEY_PASSPHRASE }}
           KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
         run: ./kotlin publish mavenCentral

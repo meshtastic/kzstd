@@ -1,5 +1,5 @@
 # detekt configuration for kzstd. Layered on top of detekt's default rules
-# (build.gradle.kts sets buildUponDefaultConfig = true), so this file only
+# (kzstd/module.yaml sets buildUponDefaultConfig: true), so this file only
 # records the deliberate deviations.
 #
 # Formatting is owned by Spotless/ktlint (which reads .editorconfig), so the

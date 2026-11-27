@@ -47,8 +47,7 @@ signed off. To fix retroactively: `git rebase --signoff HEAD~N && git push --for
 The `kotlin` wrapper provisions the Toolchain and its own JDK, so there is no separate JDK to
 install. Run `./kotlin` from the repo root.
 
-detekt runs through the local plugin in `plugins/detekt`, without type resolution, which
-matches Gradle's default detekt task. ktlint reads `.editorconfig`, so that file remains the
+detekt runs through the local plugin in `plugins/detekt`, without type resolution. ktlint reads `.editorconfig`, so that file remains the
 single source of Kotlin style; CI runs the ktlint CLI in check mode, so reformat with
 `java -jar ktlint-cli-1.8.0-all.jar -F ...` before committing. Pre-existing findings in the RFC
 8878 engine (lifted verbatim from TAKPacket-SDK) are recorded in `kzstd/detekt/baseline.xml`; the

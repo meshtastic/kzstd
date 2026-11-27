@@ -6,13 +6,17 @@
 *                            @jamesarich
 
 # Public API + the codec engine — the single source of truth
-/src/commonMain/             @jamesarich
+/kzstd/src/                   @jamesarich
 /api/                        @jamesarich
 
 # Build, publishing & CI
-/build.gradle.kts            @jamesarich
-/settings.gradle.kts         @jamesarich
+/project.yaml                @jamesarich
+/kzstd/module.yaml           @jamesarich
+/kotlin                      @jamesarich
+/kotlin.bat                  @jamesarich
 /gradle/                     @jamesarich
+/abitool/                    @jamesarich
+/plugins/                    @jamesarich
 /.github/                    @jamesarich
 
 # Security policy

@@ -6,9 +6,9 @@ a channel: consumers take the artifacts from Central.
 
 ## Secrets
 
-`SIGNING_KEY` and `SIGNING_KEY_PASSPHRASE` (the GPG key and its passphrase, passed as
-`KOTLIN_TOOLCHAIN_SIGNING_KEY` and `KOTLIN_TOOLCHAIN_SIGNING_KEY_PASSPHRASE`), and `OSSRH_USERNAME`
-and `OSSRH_PASSWORD` (Central Portal credentials).
+`SIGNING_KEY` (the ASCII-armored GPG key, passed as `KOTLIN_TOOLCHAIN_SIGNING_KEY`), and
+`OSSRH_USERNAME` and `OSSRH_PASSWORD` (the Central Portal user token, passed as
+`KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_USERNAME` and `KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_PASSWORD`).
 
 ## Cutting a release
 

@@ -20,7 +20,7 @@ env:
   KOTLIN_CLI_NO_WELCOME_BANNER: 1
 
 jobs:
-  # Lint, the full build, the JVM/Wasm/linuxX64 tests that execute on Linux, the ABI check and Kover.
+  # Lint, the full build, the JVM/Wasm/linuxX64 tests that execute on Linux, and Kover.
   linux:
     name: Quality gate & Linux tests (JVM/Wasm/linuxX64)
     runs-on: ubuntu-latest
@@ -69,9 +69,6 @@ jobs:
       - name: Tests (JVM, Wasm, linuxX64)
         run: ./kotlin test -m kzstd -p jvm -p wasmJs -p linuxX64
 
-      - name: API check
-        run: ./kotlin run -m abitool -- check "$PWD/build" api kzstd
-
       # The agent is enabled only for this step, through yq on a copy in the runner's checkout; the committed
       # kzstd/module.yaml carries no Kover line, so local `./kotlin test` runs without it.
       - name: Coverage report (Kover XML)
@@ -99,10 +96,10 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  # Apple tests need macOS to execute. Compiling the Apple klibs is not the reason: the Toolchain
-  # release gate covers them through release.yml's required-checks gate.
+  # Apple tests need macOS, and the ABI check runs here because it reads every target's klib,
+  # Apple ones included. release.yml requires this job green on the commit it releases.
   macos:
-    name: Build, Apple tests & API check
+    name: Build, test & API check (all KMP targets)
     runs-on: macos-latest
     steps:
       - name: Checkout

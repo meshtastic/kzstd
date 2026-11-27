@@ -5,7 +5,7 @@
 #       Wait for every named check run on <sha> and fail unless each one passed. With no names,
 #       the checks the `main` ruleset requires are used. Needs GH_TOKEN and GITHUB_REPOSITORY.
 #   scripts/release-checks.sh no-snapshots <version>
-#       Fail if any POM or Gradle module staged in ~/.m2 for <version> depends on a -SNAPSHOT.
+#       Fail if any POM or Gradle module staged in $MAVEN_LOCAL (default ~/.m2/repository) for <version> depends on a -SNAPSHOT.
 #       Maven Central rejects such a release only after the tag is already out.
 set -euo pipefail
 

@@ -30,9 +30,9 @@ frames that interoperate with libzstd in both directions. It was extracted from
 - `abitool/` — the ABI dump and check tool; `plugins/detekt/` — the local detekt plugin.
 - `scripts/train_test_dict.py` — regenerates the committed trained test dictionary.
 
-This is intentionally a **single-module** project: kzstd is one small codec, so the
-multi-module `build-logic` / `bom` scaffolding used by larger meshtastic KMP SDKs
-would be over-engineering here.
+The library is one module, `kzstd`; `abitool` and `plugins/detekt` are build tools, not
+published. The `bom` scaffolding used by larger meshtastic KMP SDKs would be
+over-engineering here.
 
 ## Design invariants (do not violate)
 

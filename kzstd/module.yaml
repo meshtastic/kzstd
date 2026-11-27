@@ -4,7 +4,7 @@ product:
 
 # zstd-jni is a jvmTest-only oracle, never a runtime dependency.
 test-dependencies@jvm:
-  - com.github.luben:zstd-jni:1.5.7-29
+  - $libs.zstd.jni
 
 plugins:
   detekt:
