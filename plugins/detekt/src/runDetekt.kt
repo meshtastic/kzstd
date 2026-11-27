@@ -52,7 +52,7 @@ private fun runDetekt(
 
     val inputDirs = commonParameters.sources.sourceDirectories
         .filter { it.isDirectory() }
-        .joinToString(File.pathSeparator)
+        .joinToString(",") // detekt's --input is comma-separated, unlike its --classpath
 
     outputXmlReport?.createParentDirectories()
 
