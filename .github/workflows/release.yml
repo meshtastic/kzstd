@@ -26,12 +26,15 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  KOTLIN_CLI_NO_WELCOME_BANNER: 1
+
 jobs:
   release:
     name: Gate, publish to Maven Central & release
-    # Kotlin/Native cross-compiles the Apple klibs from Linux and kzstd has no cinterop, so
-    # Linux publishes every target. It cannot run the Apple tests; the green-CI gate covers them.
-    runs-on: ubuntu-latest
+    # macOS, because the Toolchain builds Apple targets only on a Mac: on Linux `./kotlin build`
+    # skips them, and the publication would lack the Apple artifacts.
+    runs-on: macos-latest
     timeout-minutes: 90
     permissions:
       contents: write
@@ -71,9 +74,9 @@ jobs:
           V: ${{ steps.version.outputs.version }}
         run: |
           VF=$(tr -d '[:space:]' < VERSION)
-          VG=$(sed -n 's/^VERSION_NAME=//p' gradle.properties | tr -d '[:space:]')
-          if [ "$V" != "$VF" ] || [ "$V" != "$VG" ]; then
-            echo "::error::releasing $V, but VERSION is $VF and VERSION_NAME is $VG"
+          VM=$(yq -r '.settings.publishing.version' kzstd/module.yaml | tr -d '[:space:]')
+          if [ "$V" != "$VF" ] || [ "$V" != "$VM" ]; then
+            echo "::error::releasing $V, but VERSION is $VF and kzstd/module.yaml is $VM"
             exit 1
           fi
           git fetch --quiet origin "refs/tags/v$V:refs/tags/v$V" 2>/dev/null || true
@@ -112,40 +115,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: scripts/release-checks.sh green-ci "$(git rev-parse HEAD)"
 
-      - name: Setup JDK 25
-        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
-        with:
-          distribution: temurin
-          java-version: 25
+      - name: Point the toolchain caches at one directory
+        run: |
+          {
+            echo "KOTLIN_CLI_BOOTSTRAP_CACHE_DIR=$HOME/kotlin-cache/cli"
+            echo "KOTLIN_SHARED_CACHE_DIR=$HOME/kotlin-cache/shared"
+            echo "MAVEN_LOCAL=$RUNNER_TEMP/m2"
+          } >> "$GITHUB_ENV"
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-        with:
-          develocity-access-key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
-
-      - name: Cache Konan (Kotlin/Native toolchain)
+      - name: Cache the Kotlin Toolchain and dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          path: ~/kotlin-cache
+          key: kotlin-${{ runner.os }}-${{ hashFiles('kotlin', 'gradle/libs.versions.toml', 'kzstd/module.yaml', 'abitool/module.yaml', 'project.yaml') }}
           restore-keys: |
-            konan-${{ runner.os }}-
+            kotlin-${{ runner.os }}-
 
-      - name: Build, test & API check (all targets)
-        run: ./gradlew build --stacktrace
+      - name: Build every module
+        run: ./kotlin build
 
-      - name: Stage signed artifacts locally
-        env:
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
-        run: ./gradlew publishToMavenLocal --no-configuration-cache --stacktrace
+      - name: Test (JVM, Wasm, macOS)
+        run: ./kotlin test -m kzstd -p jvm -p wasmJs -p macosArm64
+
+      # The Toolchain never signs a Maven Local publication; signing happens on the Central upload.
+      - name: Stage artifacts locally
+        run: |
+          KOTLIN_CLI_JAVA_OPTIONS="-Dmaven.repo.local=$MAVEN_LOCAL" ./kotlin publish mavenLocal
 
       - name: Refuse a -SNAPSHOT dependency
         run: scripts/release-checks.sh no-snapshots "${{ steps.version.outputs.version }}"
 
+      # Toolchain 0.14.1 publishes kzstd-wasmjs and kzstd-wasmwasi; a release under those ids strands consumers.
+      - name: Refuse renamed wasm artifacts
+        run: scripts/release-checks.sh wasm-ids "${{ steps.version.outputs.version }}"
+
       - name: Collect every staged artifact for attestation
         run: |
           mkdir -p maven-attestation
-          find ~/.m2/repository/org/meshtastic -path "*/${{ steps.version.outputs.version }}/*" -type f \
+          find "$MAVEN_LOCAL/org/meshtastic" -path "*/${{ steps.version.outputs.version }}/*" -type f \
             \( -name '*.jar' -o -name '*.klib' -o -name '*.pom' -o -name '*.module' \) \
             -exec cp {} maven-attestation/ \;
           ls -1 maven-attestation
@@ -190,13 +197,14 @@ jobs:
           git tag -a "v$V" -m "v$V"
           git push origin "v$V"
 
+      # publishingMode is manual: the upload waits in the Central Portal to be released by hand.
       - name: Publish to Maven Central
         if: env.DRY_RUN != 'true' && steps.central.outputs.published != 'true'
         env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.OSSRH_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
-        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache --stacktrace
+          KOTLIN_TOOLCHAIN_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          KOTLIN_TOOLCHAIN_MAVEN_CENTRAL_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+        run: ./kotlin publish mavenCentral
 
       - name: Create or update the GitHub Release
         if: env.DRY_RUN != 'true'

@@ -14,91 +14,115 @@ concurrency:
 permissions:
   contents: read
 
+# The ./kotlin wrapper provisions the Toolchain and its own JDK, so there is no setup-java step. Both of its caches
+# live under ~/kotlin-cache so one cache step covers them on every OS.
+env:
+  KOTLIN_CLI_NO_WELCOME_BANNER: 1
+
 jobs:
-  # Code-quality gate + the targets whose tests actually EXECUTE on a Linux host:
-  # JVM, JS (Node + headless-Chrome), Wasm (wasmJs/wasmWasi on Node) and the
-  # linuxX64 Kotlin/Native binary. The macOS job below cross-compiles these but
-  # can't run the linuxX64 test binary; running them here closes that gap cheaply.
+  # Lint, the full build, the JVM/Wasm/linuxX64 tests that execute on Linux, and Kover.
   linux:
-    name: Quality gate & Linux tests (JVM/JS/Wasm/linuxX64)
+    name: Quality gate & Linux tests (JVM/Wasm/linuxX64)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup JDK 21
-        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
-        with:
-          distribution: temurin
-          java-version: 25
+      - name: Point the toolchain caches at one directory
+        run: |
+          echo "KOTLIN_CLI_BOOTSTRAP_CACHE_DIR=$HOME/kotlin-cache/cli" >> "$GITHUB_ENV"
+          echo "KOTLIN_SHARED_CACHE_DIR=$HOME/kotlin-cache/shared" >> "$GITHUB_ENV"
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-        with:
-          develocity-access-key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
-
-      - name: Cache Konan (Kotlin/Native toolchain)
+      - name: Cache the Kotlin Toolchain and dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          path: ~/kotlin-cache
+          key: kotlin-${{ runner.os }}-${{ hashFiles('kotlin', 'gradle/libs.versions.toml', 'kzstd/module.yaml', 'abitool/module.yaml', 'project.yaml') }}
           restore-keys: |
-            konan-${{ runner.os }}-
+            kotlin-${{ runner.os }}-
 
-      # Formatting (Spotless/ktlint) + static analysis (detekt) + the ABI check,
-      # then the tests that run natively on Linux. linuxX64Test builds and runs the
-      # Kotlin/Native test binary that the macOS host can only cross-compile.
-      - name: Quality gate & Linux/JVM/JS/Wasm tests
-        run: >-
-          ./gradlew
-          spotlessCheck detekt apiCheck
-          jvmTest jsTest wasmJsTest wasmWasiTest linuxX64Test
-          --stacktrace
+      # Kotlin/Native rejects commas and parentheses in test names, and only the iOS test compile shows it.
+      - name: Test names are valid on Kotlin/Native
+        run: |
+          # shellcheck disable=SC2016 # the backticks are literal: they delimit Kotlin test names
+          if grep -rn 'fun `[^`]*[,()][^`]*`' kzstd/test*/; then
+            echo "::error::Test names in kzstd/test* must not contain commas or parentheses"
+            exit 1
+          fi
 
-  build:
+      - name: Fetch ktlint CLI
+        env:
+          KTLINT_SHA256: 369ad2b789f95a011f807e1fcb690ccef80bd7cd014fd139e73ae82dcc0baeab
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ktlint-cli-1.8.0-all.jar" \
+            https://repo1.maven.org/maven2/com/pinterest/ktlint/ktlint-cli/1.8.0/ktlint-cli-1.8.0-all.jar
+          echo "$KTLINT_SHA256  $RUNNER_TEMP/ktlint-cli-1.8.0-all.jar" | sha256sum -c -
+
+      - name: Build every module
+        run: ./kotlin build
+
+      - name: Lint (detekt and ktlint)
+        run: |
+          ./kotlin check detekt -m kzstd
+          java -jar "$RUNNER_TEMP/ktlint-cli-1.8.0-all.jar" "kzstd/src/**/*.kt" "kzstd/test*/**/*.kt"
+
+      - name: Tests (JVM, Wasm, linuxX64)
+        run: ./kotlin test -m kzstd -p jvm -p wasmJs -p linuxX64
+
+      # The agent is enabled only for this step, through yq on a copy in the runner's checkout; the committed
+      # kzstd/module.yaml carries no Kover line, so local `./kotlin test` runs without it.
+      - name: Coverage report (Kover XML)
+        env:
+          KOVER_DIR: ${{ runner.temp }}/kover
+        run: |
+          mkdir -p "$KOVER_DIR"
+          curl -fsSL -o "$KOVER_DIR/kover-jvm-agent-0.9.11.jar" \
+            https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kover-jvm-agent/0.9.11/kover-jvm-agent-0.9.11.jar
+          curl -fsSL -o "$KOVER_DIR/kover-cli-0.9.11.jar" \
+            https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kover-cli/0.9.11/kover-cli-0.9.11.jar
+          echo "f1f861d50ccffd207ad6b4472da038d27961a396c5674ba7f850c01a15287bc0  $KOVER_DIR/kover-jvm-agent-0.9.11.jar" | sha256sum -c -
+          echo "6889035c98fd91484f0d37e799d73a58322a64bdcba446a2cc3a6cdaf7ff6d56  $KOVER_DIR/kover-cli-0.9.11.jar" | sha256sum -c -
+          printf 'report.file=%s/kzstd.ic\n' "$KOVER_DIR" > "$KOVER_DIR/agent.args"
+          KOVER_DIR="$KOVER_DIR" yq -i '.settings.jvm.test.freeJvmArgs = ["-javaagent:" + strenv(KOVER_DIR) + "/kover-jvm-agent-0.9.11.jar=file:" + strenv(KOVER_DIR) + "/agent.args"]' kzstd/module.yaml
+          ./kotlin test -m kzstd -p jvm
+          java -jar "$KOVER_DIR/kover-cli-0.9.11.jar" report "$KOVER_DIR/kzstd.ic" \
+            --classfiles build/artifacts/CompiledJvmArtifact/kzstdjvm/kotlin-output --src kzstd/src \
+            --xml "$KOVER_DIR/report.xml"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: ${{ runner.temp }}/kover/report.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Apple tests need macOS, and the ABI check runs here because it reads every target's klib,
+  # Apple ones included. release.yml requires this job green on the commit it releases.
+  macos:
     name: Build, test & API check (all KMP targets)
-    # macOS is required to *execute* the Apple test binaries (iOS, macOS, tvOS).
-    # Compiling their klibs is not the reason: Kotlin/Native cross-compiles those
-    # from Linux (verified on 2.4.10 — `compileKotlinIosArm64` and a full
-    # `publishToMavenLocal` both succeed there, emitting the same 14 artifacts
-    # Maven Central holds). This job is therefore the release gate for the Apple
-    # targets, and release.yml requires it to be green before publishing.
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup JDK 21
-        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
-        with:
-          distribution: temurin
-          java-version: 25
+      - name: Point the toolchain caches at one directory
+        run: |
+          echo "KOTLIN_CLI_BOOTSTRAP_CACHE_DIR=$HOME/kotlin-cache/cli" >> "$GITHUB_ENV"
+          echo "KOTLIN_SHARED_CACHE_DIR=$HOME/kotlin-cache/shared" >> "$GITHUB_ENV"
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-        with:
-          develocity-access-key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
-
-      - name: Cache Konan (Kotlin/Native toolchain)
+      - name: Cache the Kotlin Toolchain and dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
+          path: ~/kotlin-cache
+          key: kotlin-${{ runner.os }}-${{ hashFiles('kotlin', 'gradle/libs.versions.toml', 'kzstd/module.yaml', 'abitool/module.yaml', 'project.yaml') }}
           restore-keys: |
-            konan-${{ runner.os }}-
+            kotlin-${{ runner.os }}-
 
-      # `build` compiles all 13 targets, runs the common/jvm/js/wasm/macOS/iOS-sim
-      # tests, and runs `apiCheck` (binary-compatibility-validator). Linux/Windows
-      # native test binaries are cross-compiled but not executed on a macOS host.
-      - name: Build, test & API check
-        run: ./gradlew build --stacktrace
+      - name: Build every module
+        run: ./kotlin build
 
-      - name: Coverage report (Kover XML)
-        run: ./gradlew koverXmlReport
+      - name: Tests (macOS, iOS simulator)
+        run: ./kotlin test -m kzstd -p macosArm64 -p iosSimulatorArm64
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        with:
-          files: build/reports/kover/report.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: API check
+        run: ./kotlin run -m abitool -- check "$PWD/build" api kzstd

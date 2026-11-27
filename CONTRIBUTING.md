@@ -28,7 +28,7 @@ signed off. To fix retroactively: `git rebase --signoff HEAD~N && git push --for
 
 ## Environment
 
-- **JDK 21** (Temurin recommended). The build pins the Kotlin toolchain to 21.
+- No JDK install: the `./kotlin` wrapper provisions JDK 21 for the build.
 - Xcode 15+ is only needed to run the iOS/tvOS/macOS targets (macOS host).
 - No submodules.
 
@@ -36,29 +36,30 @@ signed off. To fix retroactively: `git rebase --signoff HEAD~N && git push --for
 
 | Task | Command |
 |---|---|
-| Full check (all 13 targets, tests, API check) | `./gradlew build` |
-| JVM tests (incl. the zstd-jni interop oracle) | `./gradlew jvmTest` |
-| API surface check | `./gradlew apiCheck` |
-| API surface dump (after an intended change) | `./gradlew apiDump` |
-| Reformat Kotlin (Spotless/ktlint) | `./gradlew spotlessApply` |
-| Formatting + static-analysis gate | `./gradlew spotlessCheck detekt` |
+| Full build (all 13 targets) | `./kotlin build` |
+| JVM tests (incl. the zstd-jni interop oracle) | `./kotlin test -m kzstd -p jvm` |
+| API surface check | `./kotlin run -m abitool -- check "$PWD/build" api kzstd` |
+| API surface dump (after an intended change) | `./kotlin run -m abitool -- dump "$PWD/build" api kzstd` |
+| Static analysis (detekt) | `./kotlin check detekt -m kzstd` |
+| Formatting (ktlint CLI 1.8.0, check only; needs a `java` on `PATH`, which the wrapper does not provide) | `java -jar ktlint-cli-1.8.0-all.jar "kzstd/src/**/*.kt" "kzstd/test*/**/*.kt"` |
 | Regenerate the trained test dictionary | `python3 scripts/train_test_dict.py` |
 
-Formatting (Spotless/ktlint) and static analysis (detekt) are wired into the build
-and gated in CI. ktlint reads `.editorconfig`, so that file remains the single
-source of Kotlin style. Run `./gradlew spotlessApply` to auto-format before
-committing. Pre-existing findings in the RFC 8878 engine (lifted verbatim from
-TAKPacket-SDK) are recorded in `config/detekt/baseline.xml`; the gate blocks *new*
-issues. Regenerate the baseline after intentionally clearing engine findings with
-`./gradlew detektBaseline`.
+The `kotlin` wrapper provisions the Toolchain and its own JDK, so there is no separate JDK to
+install. Run `./kotlin` from the repo root.
+
+detekt runs through the local plugin in `plugins/detekt`, without type resolution. ktlint reads `.editorconfig`, so that file remains the
+single source of Kotlin style; CI runs the ktlint CLI in check mode, so reformat with
+`java -jar ktlint-cli-1.8.0-all.jar -F ...` before committing. Pre-existing findings in the RFC
+8878 engine (lifted verbatim from TAKPacket-SDK) are recorded in `kzstd/detekt/baseline.xml`; the
+gate blocks *new* issues.
 
 ## Public API changes
 
 The public API is captured in `api/kzstd.api` by the binary-compatibility-validator
 and `explicitApi()`. After an **intentional** public-API change, run
-`./gradlew apiDump` and commit the regenerated `api/kzstd.api` in the same PR.
-`./gradlew apiCheck` (part of `build`) fails on unintended drift. Never edit the
-`.api` file by hand.
+`./kotlin run -m abitool -- dump "$PWD/build" api kzstd` and commit the regenerated
+`api/kzstd.api` and `api/kzstd.klib.api` in the same PR. The `check` mode fails on
+unintended drift, and CI runs it. Never edit the `.api` files by hand.
 
 ## Changelog
 
@@ -86,8 +87,8 @@ The changelog is also what the GitHub Release page says. `release.yml` puts
 
 1. Branch off `main`.
 2. Make the change; add tests for any new behavior.
-3. Run `./gradlew build` and fix anything red. If you changed the public API, run
-   `./gradlew apiDump` and commit the result.
+3. Run `./kotlin build` and fix anything red. If you changed the public API, run
+   the `abitool dump` command above and commit the result.
 4. Add a `CHANGELOG.md` entry under `## [Unreleased]` if a consumer would notice —
    see [Changelog](#changelog) above. An `api/*.api` move always needs one.
 5. Sign off every commit (`git commit -s`).

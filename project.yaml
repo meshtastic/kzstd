@@ -1,0 +1,7 @@
+modules:
+  - abitool
+  - kzstd
+  - plugins/detekt
+
+plugins:
+  - ./plugins/detekt

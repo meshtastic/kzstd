@@ -5,7 +5,6 @@
 [![codecov](https://codecov.io/gh/meshtastic/kzstd/graph/badge.svg)](https://codecov.io/gh/meshtastic/kzstd)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-blue.svg?logo=kotlin)](https://kotlinlang.org)
-[![Revved up by Develocity](https://img.shields.io/badge/Revved%20up%20by-Develocity-06A0CE?logo=Gradle&labelColor=02303A)](https://community.develocity.cloud/scans?search.rootProjectNames=kzstd)
 
 A pure-Kotlin, multiplatform [Zstandard](https://facebook.github.io/zstd/) (zstd)
 codec with dictionary support. It produces and reads **standard zstd frames** that
@@ -104,12 +103,12 @@ runtime dependency).
 ## Building & testing
 
 ```bash
-./gradlew build         # compile every target, run tests, check the API baseline
-./gradlew jvmTest       # JVM tests only (includes the libzstd interop oracle)
-./gradlew apiDump       # refresh the binary-compatibility API baseline
+./kotlin build          # compile every target
+./kotlin test -m kzstd -p jvm   # JVM tests only (includes the libzstd interop oracle)
+./kotlin run -m abitool -- check "$PWD/build" api kzstd   # check the API baseline
 ```
 
-The test dictionary (`src/commonTest`'s `TestVectors`) is a genuinely trained zstd
+The test dictionary (`kzstd/test`'s `TestVectors`) is a genuinely trained zstd
 dictionary regenerated reproducibly by `scripts/train_test_dict.py` (requires the
 `zstd` CLI) — its content is generic structured JSON, not domain data.
 
@@ -117,8 +116,9 @@ dictionary regenerated reproducibly by `scripts/train_test_dict.py` (requires th
 
 Contributions are welcome. See [CLAUDE.md](CLAUDE.md) for the architecture, build
 and test commands, and the design invariants, and [CHANGELOG.md](CHANGELOG.md) for
-release notes. Run `./gradlew build` (JDK 21) before opening a PR, and refresh the
-binary-compatibility baseline with `./gradlew apiDump` after any public-API change.
+release notes. Run `./kotlin build` before opening a PR, and refresh the
+binary-compatibility baseline with the `abitool dump` command in CONTRIBUTING.md after any
+public-API change.
 
 ## License
 
