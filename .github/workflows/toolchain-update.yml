@@ -5,8 +5,8 @@ name: Update Kotlin Toolchain
 # CLI download, and the wrapper script itself changes between releases.
 #
 # A person merges the pull request: a Toolchain release can move the Kotlin compiler, which a release build depends on.
-# It needs the TOOLCHAIN_UPDATE_TOKEN secret (contents and pull-requests write), because a pull
-# request opened with the workflow's own token starts no checks; without the secret the run says so and stops.
+# It uses the workflow's own token, so the repository must allow Actions to create pull requests, and a pull
+# request opened this way starts no checks by itself: CHECKS_HOW
 on:
   schedule:
     - cron: '23 7 * * *'
@@ -24,23 +24,19 @@ jobs:
     name: Update the Kotlin Toolchain wrappers
     if: github.repository_owner == 'meshtastic'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     env:
       KOTLIN_CLI_NO_WELCOME_BANNER: 1
-      HAS_TOKEN: ${{ secrets.TOOLCHAIN_UPDATE_TOKEN != '' }}
     steps:
-      - name: Stop without the token
-        if: env.HAS_TOKEN != 'true'
-        run: echo "::notice::TOOLCHAIN_UPDATE_TOKEN is not set, so no update was attempted"
-
       - name: Checkout
-        if: env.HAS_TOKEN == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Update the wrappers
         id: update
-        if: env.HAS_TOKEN == 'true'
         run: |
           before=$(sed -n 's/^kotlin_cli_version=//p' kotlin)
           ./kotlin update < /dev/null
@@ -57,7 +53,6 @@ jobs:
         if: steps.update.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8
         with:
-          token: ${{ secrets.TOOLCHAIN_UPDATE_TOKEN }}
           add-paths: |
             kotlin
             kotlin.bat
