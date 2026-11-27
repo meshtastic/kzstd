@@ -6,7 +6,9 @@
     {
       "customType": "regex",
       "description": "The Kotlin Toolchain CLI version pinned in the ./kotlin wrapper. kotlin_cli_sha256 must be updated by hand in the same change.",
-      "fileMatch": ["^kotlin$"],
+      "managerFilePatterns": [
+        "/^kotlin$/"
+      ],
       "matchStrings": ["kotlin_cli_version=(?<currentValue>[0-9.]+)"],
       "depNameTemplate": "JetBrains/kotlin-toolchain",
       "datasourceTemplate": "github-releases"
