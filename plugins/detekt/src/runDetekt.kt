@@ -7,6 +7,7 @@ package org.jetbrains.amper.plugins.detekt
 import org.jetbrains.amper.plugins.Input
 import org.jetbrains.amper.plugins.Output
 import org.jetbrains.amper.plugins.TaskAction
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Path
 import kotlin.concurrent.thread
@@ -108,11 +109,12 @@ private fun runDetekt(
 
     // FIXME: AMPER-4912 Introduce a process launching facility (shared with other plugins)
     val process = ProcessBuilder(commandLine)
-        // detekt doesn't work well on our JRE - it uses deprecated JVM features; discard these messages.
+        // detekt prints deprecated-JVM-feature warnings on our JRE, so stderr is shown only when detekt itself fails.
         // TODO: update to detect 2.0.0 when it is released
-        .redirectError(ProcessBuilder.Redirect.DISCARD)
         .redirectOutput(if (reportDiagnostics) ProcessBuilder.Redirect.PIPE else ProcessBuilder.Redirect.DISCARD)
         .start()
+    val stderr = ByteArrayOutputStream()
+    val errCapture = thread { process.errorStream.copyTo(stderr) }
     val capture = if (reportDiagnostics) {
         thread { process.inputStream.copyTo(System.out) }
     } else null
@@ -121,6 +123,10 @@ private fun runDetekt(
         .waitFor()
 
     capture?.join()
+    errCapture.join()
+
+    // Exit code 2 means findings, already printed; anything else nonzero is detekt failing to run.
+    if (exitCode != 0 && exitCode != 2) System.err.write(stderr.toByteArray())
 
     if (reportDiagnostics) {
         process.inputStream.copyTo(System.err)
@@ -128,6 +134,8 @@ private fun runDetekt(
         check(exitCode == 0) {
             "Detekt terminated with code = $exitCode. See the log above for details."
         }
+    } else {
+        check(exitCode == 0 || exitCode == 2) { "Detekt terminated with code = $exitCode." }
     }
 }
 
