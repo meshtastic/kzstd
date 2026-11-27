@@ -41,7 +41,7 @@ signed off. To fix retroactively: `git rebase --signoff HEAD~N && git push --for
 | API surface check | `./kotlin run -m abitool -- check "$PWD/build" api kzstd` |
 | API surface dump (after an intended change) | `./kotlin run -m abitool -- dump "$PWD/build" api kzstd` |
 | Static analysis (detekt) | `./kotlin check detekt -m kzstd` |
-| Formatting (ktlint CLI 1.8.0, check only) | `java -jar ktlint-cli-1.8.0-all.jar "kzstd/src/**/*.kt" "kzstd/test*/**/*.kt"` |
+| Formatting (ktlint CLI 1.8.0, check only; needs a `java` on `PATH`, which the wrapper does not provide) | `java -jar ktlint-cli-1.8.0-all.jar "kzstd/src/**/*.kt" "kzstd/test*/**/*.kt"` |
 | Regenerate the trained test dictionary | `python3 scripts/train_test_dict.py` |
 
 The `kotlin` wrapper provisions the Toolchain and its own JDK, so there is no separate JDK to

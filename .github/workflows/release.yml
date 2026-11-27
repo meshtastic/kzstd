@@ -145,6 +145,10 @@ jobs:
       - name: Refuse a -SNAPSHOT dependency
         run: scripts/release-checks.sh no-snapshots "${{ steps.version.outputs.version }}"
 
+      # Toolchain 0.14.1 publishes kzstd-wasmjs and kzstd-wasmwasi; a release under those ids strands consumers.
+      - name: Refuse renamed wasm artifacts
+        run: scripts/release-checks.sh wasm-ids "${{ steps.version.outputs.version }}"
+
       - name: Collect every staged artifact for attestation
         run: |
           mkdir -p maven-attestation

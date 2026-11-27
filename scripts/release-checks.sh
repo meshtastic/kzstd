@@ -7,6 +7,9 @@
 #   scripts/release-checks.sh no-snapshots <version>
 #       Fail if any POM or Gradle module staged in $MAVEN_LOCAL (default ~/.m2/repository) for <version> depends on a -SNAPSHOT.
 #       Maven Central rejects such a release only after the tag is already out.
+#   scripts/release-checks.sh wasm-ids <version>
+#       Fail unless $MAVEN_LOCAL stages kzstd-wasm-js and kzstd-wasm-wasi for <version>, the ids consumers resolve.
+#       Kotlin Toolchain 0.14.1 stages kzstd-wasmjs and kzstd-wasmwasi instead.
 set -euo pipefail
 
 die() {
@@ -15,7 +18,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -96,11 +99,23 @@ no_snapshots() {
   echo "ok   ${#staged[@]} staged POM/module files for $version, no -SNAPSHOT dependency"
 }
 
+wasm_ids() {
+  local version="$1"
+  local root="${MAVEN_LOCAL:-$HOME/.m2/repository}/org/meshtastic"
+  local id
+  for id in kzstd-wasm-js kzstd-wasm-wasi; do
+    [ -f "$root/$id/$version/$id-$version.pom" ] ||
+      die "$id is not staged for $version under $root: this Toolchain renames the wasm artifacts, and consumers resolve $id"
+  done
+  echo "ok   kzstd-wasm-js and kzstd-wasm-wasi staged for $version"
+}
+
 [ $# -ge 2 ] || usage
 cmd="$1"
 shift
 case "$cmd" in
   green-ci) green_ci "$@" ;;
   no-snapshots) no_snapshots "${1#v}" ;;
+  wasm-ids) wasm_ids "${1#v}" ;;
   *) usage ;;
 esac

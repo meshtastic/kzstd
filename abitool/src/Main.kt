@@ -6,6 +6,15 @@ import org.jetbrains.kotlin.abi.tools.KlibTarget
 import java.io.File
 import kotlin.system.exitProcess
 
+private const val TARGETS_PREFIX = "// Targets: ["
+
+/** The targets a committed klib dump covers, from its `// Targets: [a, b]` header; empty when there is no dump. */
+internal fun baselineTargets(klibDump: File): Set<String> {
+    if (!klibDump.exists()) return emptySet()
+    val header = klibDump.useLines { lines -> lines.firstOrNull { it.startsWith(TARGETS_PREFIX) } } ?: return emptySet()
+    return header.removePrefix(TARGETS_PREFIX).substringBefore(']').split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+}
+
 // Usage: abitool <dump|check> <buildDir> <apiDir> <module>
 // dump writes <apiDir>/<module>.api and <module>.klib.api; check compares and exits 1 on drift.
 fun main(args: Array<String>) {
@@ -24,14 +33,25 @@ fun main(args: Array<String>) {
         .filter { (name, _) -> name != "Jvm" && name != "Android" && !name.startsWith("Metadata") }
         .sortedBy { it.first }
     val merged = tools.createKlibDump()
-    for ((name, klib) in klibs) {
-        val target = KlibTarget(name.replaceFirstChar { it.lowercase() })
-        merged.merge(tools.extractKlibAbi(klib, target))
+    val built = klibs.map { (name, _) -> name.replaceFirstChar { it.lowercase() } }
+    for ((index, klib) in klibs.map { it.second }.withIndex()) {
+        merged.merge(tools.extractKlibAbi(klib, KlibTarget(built[index])))
     }
     val klibText = merged.print(StringBuilder()).toString()
 
     val jvmFile = File(apiDir, "$module.api")
     val klibFile = File(apiDir, "$module.klib.api")
+
+    // The Toolchain builds Apple targets only on a Mac and skips them silently elsewhere, so a build that lacks a
+    // target the baseline has would dump or diff as if that target's API were removed.
+    val missing = baselineTargets(klibFile) - built.toSet()
+    if (missing.isNotEmpty()) {
+        System.err.println(
+            "abitool: the build has no klib for ${missing.sorted().joinToString()}, which ${klibFile.name} covers. " +
+                "Run ./kotlin build on macOS first; to drop a target on purpose, delete ${klibFile.name} and dump again.",
+        )
+        exitProcess(1)
+    }
     when (mode) {
         "dump" -> {
             apiDir.mkdirs(); jvmFile.writeText(jvmText); klibFile.writeText(klibText)

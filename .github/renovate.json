@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Org-wide policy for published KMP libraries — automerge baseline, 3-day soak, kotlin-toolchain and first-party holds. See meshtastic/.github:kmp-library.json for the rules and their rationale. kzstd needs no local overrides.",
+  "description": "Org-wide policy for published KMP libraries — automerge baseline, 3-day soak, kotlin-toolchain and first-party holds. See meshtastic/.github:kmp-library.json for the rules and their rationale. kzstd adds the Kotlin Toolchain wrapper, which the preset's Gradle-only hold does not cover.",
   "extends": ["local>meshtastic/.github:kmp-library"],
   "customManagers": [
     {
@@ -10,6 +10,14 @@
       "matchStrings": ["kotlin_cli_version=(?<currentValue>[0-9.]+)"],
       "depNameTemplate": "JetBrains/kotlin-toolchain",
       "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "HOLD: a Toolchain bump changes the compiler and needs kotlin_cli_sha256 edited by hand, so a human merges it.",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["JetBrains/kotlin-toolchain"],
+      "automerge": false
     }
   ]
 }
