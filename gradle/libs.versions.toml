@@ -2,7 +2,7 @@
 # zstd-jni is a jvmTest-only oracle, not a runtime dependency. The interop tests
 # cross-check that kzstd's pure-Kotlin frames are decodable by real libzstd (and
 # that kzstd decodes real libzstd frames): the both-directions interop gate.
-zstd-jni = "1.5.7-29"
+zstd-jni = "1.6.0-1"
 
 [libraries]
 zstd-jni = { module = "com.github.luben:zstd-jni", version.ref = "zstd-jni" }
