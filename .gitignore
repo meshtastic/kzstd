@@ -3,6 +3,8 @@ build/
 out/
 .kotlin/
 *.class
+# Left by Gradle builds from before the Toolchain move
+.gradle/
 
 # IDE
 .idea/
